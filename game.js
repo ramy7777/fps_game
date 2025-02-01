@@ -94,28 +94,23 @@ class Game {
         });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
 
-        // Position bullet at character's gun position (slightly elevated and forward)
-        const spawnOffset = new THREE.Vector3(0.3, 1.2, -0.5);
-        spawnOffset.applyQuaternion(this.character.quaternion);
-        const spawnPoint = this.character.position.clone().add(spawnOffset);
-        bullet.position.copy(spawnPoint);
+        // Calculate spawn position (this stays the same)
+        const lookAtPos = this.camera.position.clone();
+        lookAtPos.y = this.character.position.y + 1; // Set to character's head level
+        const spawnDistance = 2; // Distance in front of camera
 
-        // Calculate target point (where the crosshair is pointing)
-        const targetPoint = new THREE.Vector3(0, 0, -1);
-        targetPoint.applyEuler(new THREE.Euler(this.cameraPitch, this.cameraYaw, 0, 'YXZ'));
-        targetPoint.multiplyScalar(100); // Project far into the distance
-        targetPoint.add(this.camera.position); // Make it relative to camera position
-
-        // Calculate direction from spawn point to target point
-        const direction = new THREE.Vector3()
-            .subVectors(targetPoint, spawnPoint)
-            .normalize();
-
-        // Set bullet velocity
-        bullet.velocity = direction.multiplyScalar(1.5);
+        // Get character's forward direction for bullet trajectory
+        const direction = new THREE.Vector3(0, 0, -1);
+        direction.applyQuaternion(this.character.quaternion);
+        
+        // Set bullet position
+        bullet.position.copy(lookAtPos).add(direction.multiplyScalar(spawnDistance));
+        
+        // Set bullet velocity to go straight forward
+        bullet.velocity = direction.normalize().multiplyScalar(1.5);
+        
         bullet.alive = true;
         this.bullets.push(bullet);
-
         this.scene.add(bullet);
         
         setTimeout(() => {
@@ -346,11 +341,15 @@ class Game {
             'YXZ'
         ));
         idealOffset.add(this.character.position);
+        
+        // Adjust camera height to match crosshair
+        const eyeHeight = 1.6; // Character's eye level
+        idealOffset.y = this.character.position.y + eyeHeight;
         this.camera.position.copy(idealOffset);
 
-        // Make camera look at character's head level
+        // Make camera look at the same height level
         const lookAtPos = this.character.position.clone();
-        lookAtPos.y += 1;
+        lookAtPos.y = this.camera.position.y;
         this.camera.lookAt(lookAtPos);
     }
 
