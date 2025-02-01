@@ -65,14 +65,13 @@ class Game {
 
     onMouseMove(event) {
         if (document.pointerLockElement === this.renderer.domElement) {
-            // Update camera and character rotation
             this.cameraYaw -= event.movementX * this.mouseSensitivity;
             this.cameraPitch -= event.movementY * this.mouseSensitivity;
             
-            // Clamp the pitch to prevent camera flipping
-            this.cameraPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.cameraPitch));
+            // Clamp the pitch to prevent over-rotation
+            this.cameraPitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.cameraPitch));
 
-            // Rotate character with camera
+            // Update character rotation to match camera
             this.character.rotation.y = this.cameraYaw;
         }
     }
@@ -94,17 +93,22 @@ class Game {
         });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
 
-        // Calculate spawn position (this stays the same)
-        const lookAtPos = this.camera.position.clone();
-        lookAtPos.y = this.character.position.y + 1; // Set to character's head level
-        const spawnDistance = 2; // Distance in front of camera
+        // Calculate spawn position from character position
+        const spawnDistance = 4; // Distance in front of character
+        const characterHeadHeight = 1.5; // Height of character's head
 
-        // Get character's forward direction for bullet trajectory
+        // Get character's forward direction
         const direction = new THREE.Vector3(0, 0, -1);
         direction.applyQuaternion(this.character.quaternion);
         
-        // Set bullet position
-        bullet.position.copy(lookAtPos).add(direction.multiplyScalar(spawnDistance));
+        // Set bullet position from character
+        bullet.position.copy(this.character.position);
+        bullet.position.y += characterHeadHeight; // Set to head height
+        bullet.position.add(direction.multiplyScalar(spawnDistance));
+        
+        // Reset direction for velocity
+        direction.set(0, 0, -1);
+        direction.applyQuaternion(this.character.quaternion);
         
         // Set bullet velocity to go straight forward
         bullet.velocity = direction.normalize().multiplyScalar(1.5);
@@ -328,28 +332,32 @@ class Game {
             this.isJumping = false;
         }
 
-        // Update camera position
-        const idealOffset = new THREE.Vector3(
-            0,
-            this.cameraHeight,
-            this.cameraDistance
-        );
-        idealOffset.applyEuler(new THREE.Euler(
-            this.cameraPitch,
-            this.cameraYaw,
-            0,
-            'YXZ'
-        ));
-        idealOffset.add(this.character.position);
+        // Calculate camera position
+        const idealOffset = new THREE.Vector3(0, this.cameraHeight, this.cameraDistance);
         
-        // Adjust camera height to match crosshair
-        const eyeHeight = 1.6; // Character's eye level
-        idealOffset.y = this.character.position.y + eyeHeight;
+        // First rotate around Y axis (left/right)
+        idealOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.cameraYaw);
+        
+        // Then rotate for pitch (up/down) around the rotated X axis
+        const rightVector = new THREE.Vector3(
+            Math.sin(this.cameraYaw + Math.PI / 2),
+            0,
+            Math.cos(this.cameraYaw + Math.PI / 2)
+        );
+        idealOffset.applyAxisAngle(rightVector, this.cameraPitch);
+        
+        // Add to character position
+        idealOffset.add(this.character.position);
         this.camera.position.copy(idealOffset);
 
-        // Make camera look at the same height level
+        // Calculate crosshair look position
         const lookAtPos = this.character.position.clone();
-        lookAtPos.y = this.camera.position.y;
+        lookAtPos.y += 1.5; // Set to character head height
+        const forward = new THREE.Vector3(0, 0, -4);
+        forward.applyQuaternion(this.character.quaternion);
+        lookAtPos.add(forward);
+        
+        // Make camera look at crosshair position
         this.camera.lookAt(lookAtPos);
     }
 
