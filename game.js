@@ -93,23 +93,21 @@ class Game {
         });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
 
-        // Get crosshair position (target for bullet)
-        const crosshairPos = this.character.position.clone();
-        crosshairPos.y += 1.2; // Head height
-        const forward = new THREE.Vector3(0, 0, -1);
-        forward.applyQuaternion(this.character.quaternion);
-        crosshairPos.add(forward.multiplyScalar(4)); // 4 units forward
-
-        // Set bullet spawn position at character's chest
+        // Set bullet spawn position lower on character
         bullet.position.copy(this.character.position);
-        bullet.position.y += 1.0; // Chest height
+        bullet.position.y += 0.8; // Lower spawn point
 
-        // Calculate direction from spawn to crosshair
-        const direction = new THREE.Vector3();
-        direction.subVectors(crosshairPos, bullet.position).normalize();
+        // Get character's forward direction for straight trajectory
+        const direction = new THREE.Vector3(0, 0, -1);
+        direction.applyQuaternion(this.character.quaternion);
         
-        // Set bullet velocity towards crosshair
-        bullet.velocity = direction.multiplyScalar(1.5);
+        // Add the same left offset as crosshair
+        const right = new THREE.Vector3(-0.08, 0, 0);
+        right.applyQuaternion(this.character.quaternion);
+        direction.add(right.multiplyScalar(0.02)); // Scale down the left offset for direction
+        
+        // Set bullet velocity for straight path
+        bullet.velocity = direction.normalize().multiplyScalar(1.5);
         
         bullet.alive = true;
         this.bullets.push(bullet);
@@ -350,10 +348,17 @@ class Game {
 
         // Calculate crosshair look position
         const lookAtPos = this.character.position.clone();
-        lookAtPos.y += 1.2; 
+        lookAtPos.y += 1.2;
+        
+        // Calculate forward and right vectors for crosshair position
         const forward = new THREE.Vector3(0, 0, -4);
         forward.applyQuaternion(this.character.quaternion);
-        lookAtPos.add(forward);
+        
+        const right = new THREE.Vector3(0.12, 0, 0); 
+        right.applyQuaternion(this.character.quaternion);
+        
+        // Add both vectors to move crosshair forward and right
+        lookAtPos.add(forward).add(right);
         
         // Make camera look at crosshair position
         this.camera.lookAt(lookAtPos);
