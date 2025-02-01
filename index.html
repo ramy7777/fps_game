@@ -27,10 +27,73 @@
             transform-style: preserve-3d;
             perspective: 1000px;
         }
+        #menu {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            color: white;
+            display: none;
+        }
+        .button {
+            background: #4CAF50;
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        #gameId {
+            display: none;
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        #joinPrompt {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            color: white;
+        }
+        input {
+            padding: 10px;
+            margin: 10px;
+            border-radius: 4px;
+            border: none;
+        }
     </style>
 </head>
 <body>
     <div id="crosshair">+</div>
+    <div id="menu">
+        <h2>Multiplayer FPS</h2>
+        <button id="hostButton" class="button">Host Game</button>
+        <button id="joinButton" class="button">Join Game</button>
+    </div>
+    <div id="joinPrompt">
+        <h3>Enter Game ID</h3>
+        <input type="text" id="gameIdInput" placeholder="Game ID">
+        <button id="confirmJoin" class="button">Join</button>
+    </div>
+    <div id="gameId"></div>
     <script type="importmap">
         {
             "imports": {

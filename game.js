@@ -47,6 +47,31 @@ class Game {
         this.canShoot = true;
         this.bullets = [];
 
+        // Multiplayer properties
+        this.ws = null;
+        this.playerId = null;
+        this.otherPlayers = new Map();
+        this.gameId = null;
+
+        // UI Elements
+        this.menu = document.getElementById('menu');
+        this.joinPrompt = document.getElementById('joinPrompt');
+        this.gameIdDisplay = document.getElementById('gameId');
+        
+        // Show menu on start
+        this.menu.style.display = 'block';
+
+        // Bind event listeners
+        document.getElementById('hostButton').addEventListener('click', () => this.hostGame());
+        document.getElementById('joinButton').addEventListener('click', () => {
+            this.menu.style.display = 'none';
+            this.joinPrompt.style.display = 'block';
+        });
+        document.getElementById('confirmJoin').addEventListener('click', () => {
+            const gameId = parseInt(document.getElementById('gameIdInput').value);
+            this.joinGame(gameId);
+        });
+
         // Animation
         this.animate();
 
@@ -126,6 +151,23 @@ class Game {
         setTimeout(() => {
             this.canShoot = true;
         }, 250);
+
+        // Send shot information to server
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'shoot',
+                position: {
+                    x: bullet.position.x,
+                    y: bullet.position.y,
+                    z: bullet.position.z
+                },
+                direction: {
+                    x: bullet.velocity.x,
+                    y: bullet.velocity.y,
+                    z: bullet.velocity.z
+                }
+            }));
+        }
     }
 
     setupEnvironment() {
@@ -281,6 +323,129 @@ class Game {
         }
     }
 
+    connectToServer() {
+        this.ws = new WebSocket('ws://localhost:3000');
+        
+        this.ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            switch(data.type) {
+                case 'gameCreated':
+                    this.gameId = data.gameId;
+                    this.playerId = data.playerId;
+                    this.gameIdDisplay.textContent = `Game ID: ${this.gameId}`;
+                    this.gameIdDisplay.style.display = 'block';
+                    break;
+
+                case 'gameJoined':
+                    this.gameId = data.gameId;
+                    this.playerId = data.playerId;
+                    // Create other players
+                    data.players.forEach(player => this.createOtherPlayer(player.id, player.position));
+                    break;
+
+                case 'playerJoined':
+                    this.createOtherPlayer(data.playerId, data.position);
+                    break;
+
+                case 'playerLeft':
+                    this.removeOtherPlayer(data.playerId);
+                    break;
+
+                case 'playerMoved':
+                    this.updateOtherPlayer(data.playerId, data.position);
+                    break;
+
+                case 'playerShot':
+                    this.handleOtherPlayerShot(data.playerId, data.position, data.direction);
+                    break;
+            }
+        };
+    }
+
+    hostGame() {
+        this.connectToServer();
+        this.menu.style.display = 'none';
+        
+        this.ws.onopen = () => {
+            this.ws.send(JSON.stringify({
+                type: 'host',
+                position: {
+                    x: this.character.position.x,
+                    y: this.character.position.y,
+                    z: this.character.position.z
+                }
+            }));
+        };
+    }
+
+    joinGame(gameId) {
+        this.connectToServer();
+        this.joinPrompt.style.display = 'none';
+        
+        this.ws.onopen = () => {
+            this.ws.send(JSON.stringify({
+                type: 'join',
+                gameId: gameId,
+                position: {
+                    x: this.character.position.x,
+                    y: this.character.position.y,
+                    z: this.character.position.z
+                }
+            }));
+        };
+    }
+
+    createOtherPlayer(playerId, position) {
+        const geometry = new THREE.BoxGeometry(1, 2, 1);
+        const material = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+        const player = new THREE.Mesh(geometry, material);
+        
+        player.position.set(position.x, position.y, position.z);
+        this.scene.add(player);
+        this.otherPlayers.set(playerId, player);
+    }
+
+    removeOtherPlayer(playerId) {
+        const player = this.otherPlayers.get(playerId);
+        if (player) {
+            this.scene.remove(player);
+            this.otherPlayers.delete(playerId);
+        }
+    }
+
+    updateOtherPlayer(playerId, position) {
+        const player = this.otherPlayers.get(playerId);
+        if (player) {
+            player.position.set(position.x, position.y, position.z);
+        }
+    }
+
+    handleOtherPlayerShot(playerId, position, direction) {
+        // Create bullet for other player's shot
+        const bulletGeometry = new THREE.SphereGeometry(0.2);
+        const bulletMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0xff0000,
+            shininess: 30
+        });
+        const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+        
+        bullet.position.set(position.x, position.y, position.z);
+        bullet.velocity = new THREE.Vector3(direction.x, direction.y, direction.z);
+        
+        this.bullets.push(bullet);
+        this.scene.add(bullet);
+        
+        setTimeout(() => {
+            bullet.alive = false;
+            this.scene.remove(bullet);
+            const index = this.bullets.indexOf(bullet);
+            if (index > -1) {
+                this.bullets.splice(index, 1);
+            }
+        }, 2000);
+    }
+
     updateCharacter() {
         const speed = 0.1;
         const direction = new THREE.Vector3();
@@ -362,6 +527,18 @@ class Game {
         
         // Make camera look at crosshair position
         this.camera.lookAt(lookAtPos);
+
+        // Send position update to server
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'update',
+                position: {
+                    x: this.character.position.x,
+                    y: this.character.position.y,
+                    z: this.character.position.z
+                }
+            }));
+        }
     }
 
     updateBullets() {
@@ -381,5 +558,5 @@ class Game {
     }
 }
 
-// Initialize the game
+// Initialize game
 const game = new Game();
