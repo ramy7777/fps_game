@@ -86,32 +86,30 @@ class Game {
         if (!this.canShoot) return;
 
         // Create bullet
-        const bulletGeometry = new THREE.SphereGeometry(0.1);
+        const bulletGeometry = new THREE.SphereGeometry(0.2); 
         const bulletMaterial = new THREE.MeshPhongMaterial({ 
             color: 0xff0000,
             shininess: 30
         });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
 
-        // Calculate spawn position from character position
-        const spawnDistance = 4; // Distance in front of character
-        const characterHeadHeight = 1.5; // Height of character's head
+        // Get crosshair position (target for bullet)
+        const crosshairPos = this.character.position.clone();
+        crosshairPos.y += 1.2; // Head height
+        const forward = new THREE.Vector3(0, 0, -1);
+        forward.applyQuaternion(this.character.quaternion);
+        crosshairPos.add(forward.multiplyScalar(4)); // 4 units forward
 
-        // Get character's forward direction
-        const direction = new THREE.Vector3(0, 0, -1);
-        direction.applyQuaternion(this.character.quaternion);
-        
-        // Set bullet position from character
+        // Set bullet spawn position at character's chest
         bullet.position.copy(this.character.position);
-        bullet.position.y += characterHeadHeight; // Set to head height
-        bullet.position.add(direction.multiplyScalar(spawnDistance));
+        bullet.position.y += 1.0; // Chest height
+
+        // Calculate direction from spawn to crosshair
+        const direction = new THREE.Vector3();
+        direction.subVectors(crosshairPos, bullet.position).normalize();
         
-        // Reset direction for velocity
-        direction.set(0, 0, -1);
-        direction.applyQuaternion(this.character.quaternion);
-        
-        // Set bullet velocity to go straight forward
-        bullet.velocity = direction.normalize().multiplyScalar(1.5);
+        // Set bullet velocity towards crosshair
+        bullet.velocity = direction.multiplyScalar(1.5);
         
         bullet.alive = true;
         this.bullets.push(bullet);
@@ -352,7 +350,7 @@ class Game {
 
         // Calculate crosshair look position
         const lookAtPos = this.character.position.clone();
-        lookAtPos.y += 1.5; // Set to character head height
+        lookAtPos.y += 1.2; 
         const forward = new THREE.Vector3(0, 0, -4);
         forward.applyQuaternion(this.character.quaternion);
         lookAtPos.add(forward);
