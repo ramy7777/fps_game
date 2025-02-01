@@ -79,6 +79,31 @@
             border-radius: 4px;
             border: none;
         }
+        .death-screen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            color: white;
+        }
+        .death-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            font-size: 2em;
+            z-index: 1000;
+        }
     </style>
 </head>
 <body>
@@ -94,6 +119,10 @@
         <button id="confirmJoin" class="button">Join</button>
     </div>
     <div id="gameId"></div>
+    <div id="gameContainer"></div>
+    <div class="death-screen">
+        ELIMINATED! You can still move but cannot shoot
+    </div>
     <script type="importmap">
         {
             "imports": {
@@ -103,5 +132,24 @@
         }
     </script>
     <script type="module" src="game.js"></script>
+    <script>
+        // Add elimination listener
+        socket.on('playerEliminated', (data) => {
+          if (data.eliminatedId === socket.id) {
+            // Handle local player death
+            document.getElementById('gameContainer').innerHTML += `
+              <div class="death-screen">
+                <h2>ELIMINATED BY PLAYER ${data.eliminatorId.slice(0,4)}</h2>
+                <p>Waiting for next round...</p>
+              </div>
+            `;
+            // Disable controls
+            window.isAlive = false;
+          }
+          // Remove eliminated player from view
+          const eliminatedElement = document.getElementById(`player-${data.eliminatedId}`);
+          if (eliminatedElement) eliminatedElement.remove();
+        });
+    </script>
 </body>
 </html>

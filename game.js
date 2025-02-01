@@ -324,9 +324,31 @@ class Game {
         }
     }
 
-    connectToServer() {
-        this.ws = new WebSocket('ws://localhost:3000');
-        
+    setupWebSocket() {
+        this.ws = new WebSocket(`ws://${window.location.host}`);
+        this.reconnectAttempts = 0;
+
+        this.ws.onopen = () => {
+            console.log('WebSocket connected');
+            this.reconnectAttempts = 0;
+            // Start heartbeat
+            this.pingInterval = setInterval(() => {
+                if (this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({ type: 'ping' }));
+                }
+            }, 25000);
+        };
+
+        this.ws.onclose = (event) => {
+            console.log(`WebSocket closed: ${event.code} ${event.reason}`);
+            clearInterval(this.pingInterval);
+            this.handleReconnection();
+        };
+
+        this.ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+
         this.ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             
@@ -393,12 +415,38 @@ class Game {
                 case 'playerShot':
                     this.handleOtherPlayerShot(data.playerId, data.position, data.direction, data.color);
                     break;
+
+                case 'playerEliminated':
+                    if (data.playerId === this.playerId) {
+                        this.showDeathScreen();
+                        this.canShoot = false;
+                        this.character.material.transparent = true;
+                        this.character.material.opacity = 0.5;
+                    } else {
+                        const player = this.otherPlayers.get(data.playerId);
+                        if (player) {
+                            player.mesh.material.transparent = true;
+                            player.mesh.material.opacity = 0.3;
+                        }
+                    }
+                    break;
             }
         };
     }
 
+    handleReconnection() {
+        if (this.reconnectAttempts < 5) {
+            const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+            console.log(`Reconnecting in ${delay}ms...`);
+            setTimeout(() => {
+                this.reconnectAttempts++;
+                this.setupWebSocket();
+            }, delay);
+        }
+    }
+
     hostGame() {
-        this.connectToServer();
+        this.setupWebSocket();
         this.menu.style.display = 'none';
         
         this.ws.onopen = () => {
@@ -414,7 +462,7 @@ class Game {
     }
 
     joinGame(gameId) {
-        this.connectToServer();
+        this.setupWebSocket();
         this.joinPrompt.style.display = 'none';
         
         this.ws.onopen = () => {
@@ -487,6 +535,25 @@ class Game {
                 this.bullets.splice(index, 1);
             }
         }, 2000);
+        
+        for (let id of this.otherPlayers.keys()) {
+            const player = this.otherPlayers.get(id).mesh;
+            const distance = player.position.distanceTo(bullet.position);
+            if (distance < 1.5) {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    console.log(`[HIT] Sending hit event for ${id}`);
+                    this.ws.send(JSON.stringify({ type: 'hit', targetId: id }));
+                } else {
+                    console.warn('Cannot send hit - WebSocket connection closed');
+                }
+                bullet.alive = false;
+                this.scene.remove(bullet);
+            }
+        }
+    }
+
+    showDeathScreen() {
+        // Implement death screen UI here
     }
 
     updateCharacter() {
@@ -589,6 +656,21 @@ class Game {
             if (bullet.alive) {
                 // Update bullet position
                 bullet.position.add(bullet.velocity);
+                
+                for (let id of this.otherPlayers.keys()) {
+                    const player = this.otherPlayers.get(id).mesh;
+                    const distance = player.position.distanceTo(bullet.position);
+                    if (distance < 1.5) {
+                        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                            console.log(`[HIT] Sending hit event for ${id}`);
+                            this.ws.send(JSON.stringify({ type: 'hit', targetId: id }));
+                        } else {
+                            console.warn('Cannot send hit - WebSocket connection closed');
+                        }
+                        bullet.alive = false;
+                        this.scene.remove(bullet);
+                    }
+                }
             }
         }
     }
