@@ -52,6 +52,7 @@ class Game {
         this.playerId = null;
         this.otherPlayers = new Map();
         this.gameId = null;
+        this.playerColor = null;
 
         // UI Elements
         this.menu = document.getElementById('menu');
@@ -110,17 +111,17 @@ class Game {
     shoot() {
         if (!this.canShoot) return;
 
-        // Create bullet
+        // Create bullet with player's color
         const bulletGeometry = new THREE.SphereGeometry(0.2); 
         const bulletMaterial = new THREE.MeshPhongMaterial({ 
-            color: 0xff0000,
+            color: this.playerColor || 0xff0000,
             shininess: 30
         });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
 
-        // Set bullet spawn position lower on character
+        // Set bullet spawn position
         bullet.position.copy(this.character.position);
-        bullet.position.y += 0.8; // Lower spawn point
+        bullet.position.y += 0.8;
 
         // Get character's forward direction for straight trajectory
         const direction = new THREE.Vector3(0, 0, -1);
@@ -129,29 +130,15 @@ class Game {
         // Add the same left offset as crosshair
         const right = new THREE.Vector3(-0.08, 0, 0);
         right.applyQuaternion(this.character.quaternion);
-        direction.add(right.multiplyScalar(0.02)); // Scale down the left offset for direction
+        direction.add(right.multiplyScalar(0.02));
         
         // Set bullet velocity for straight path
         bullet.velocity = direction.normalize().multiplyScalar(1.5);
-        
         bullet.alive = true;
+        
         this.bullets.push(bullet);
         this.scene.add(bullet);
         
-        setTimeout(() => {
-            bullet.alive = false;
-            this.scene.remove(bullet);
-            const index = this.bullets.indexOf(bullet);
-            if (index > -1) {
-                this.bullets.splice(index, 1);
-            }
-        }, 2000);
-
-        this.canShoot = false;
-        setTimeout(() => {
-            this.canShoot = true;
-        }, 250);
-
         // Send shot information to server
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
@@ -168,6 +155,20 @@ class Game {
                 }
             }));
         }
+        
+        setTimeout(() => {
+            bullet.alive = false;
+            this.scene.remove(bullet);
+            const index = this.bullets.indexOf(bullet);
+            if (index > -1) {
+                this.bullets.splice(index, 1);
+            }
+        }, 2000);
+
+        this.canShoot = false;
+        setTimeout(() => {
+            this.canShoot = true;
+        }, 250);
     }
 
     setupEnvironment() {
@@ -333,6 +334,7 @@ class Game {
                 case 'gameCreated':
                     this.gameId = data.gameId;
                     this.playerId = data.playerId;
+                    this.playerColor = data.color;
                     this.gameIdDisplay.textContent = `Game ID: ${this.gameId}`;
                     this.gameIdDisplay.style.display = 'block';
                     break;
@@ -340,12 +342,21 @@ class Game {
                 case 'gameJoined':
                     this.gameId = data.gameId;
                     this.playerId = data.playerId;
+                    this.playerColor = data.color;
+                    
+                    // Clear any existing players first
+                    Array.from(this.otherPlayers.keys()).forEach(id => {
+                        this.removeOtherPlayer(id);
+                    });
+                    
                     // Create other players
-                    data.players.forEach(player => this.createOtherPlayer(player.id, player.position));
+                    data.players.forEach(player => {
+                        this.createOtherPlayer(player.id, player.position, player.color);
+                    });
                     break;
 
                 case 'playerJoined':
-                    this.createOtherPlayer(data.playerId, data.position);
+                    this.createOtherPlayer(data.playerId, data.position, data.color);
                     break;
 
                 case 'playerLeft':
@@ -357,7 +368,7 @@ class Game {
                     break;
 
                 case 'playerShot':
-                    this.handleOtherPlayerShot(data.playerId, data.position, data.direction);
+                    this.handleOtherPlayerShot(data.playerId, data.position, data.direction, data.color);
                     break;
             }
         };
@@ -396,42 +407,51 @@ class Game {
         };
     }
 
-    createOtherPlayer(playerId, position) {
+    createOtherPlayer(playerId, position, color) {
+        // Remove any existing player with this ID first
+        this.removeOtherPlayer(playerId);
+        
         const geometry = new THREE.BoxGeometry(1, 2, 1);
-        const material = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+        const material = new THREE.MeshPhongMaterial({ 
+            color: color || 0xff0000,
+            shininess: 30
+        });
         const player = new THREE.Mesh(geometry, material);
         
         player.position.set(position.x, position.y, position.z);
         this.scene.add(player);
-        this.otherPlayers.set(playerId, player);
+        this.otherPlayers.set(playerId, {
+            mesh: player,
+            color: color
+        });
     }
 
     removeOtherPlayer(playerId) {
-        const player = this.otherPlayers.get(playerId);
-        if (player) {
-            this.scene.remove(player);
+        const playerData = this.otherPlayers.get(playerId);
+        if (playerData) {
+            this.scene.remove(playerData.mesh);
             this.otherPlayers.delete(playerId);
         }
     }
 
     updateOtherPlayer(playerId, position) {
-        const player = this.otherPlayers.get(playerId);
-        if (player) {
-            player.position.set(position.x, position.y, position.z);
+        const playerData = this.otherPlayers.get(playerId);
+        if (playerData) {
+            playerData.mesh.position.set(position.x, position.y, position.z);
         }
     }
 
-    handleOtherPlayerShot(playerId, position, direction) {
-        // Create bullet for other player's shot
+    handleOtherPlayerShot(playerId, position, direction, color) {
         const bulletGeometry = new THREE.SphereGeometry(0.2);
         const bulletMaterial = new THREE.MeshPhongMaterial({ 
-            color: 0xff0000,
+            color: color || 0xff0000,
             shininess: 30
         });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
         
         bullet.position.set(position.x, position.y, position.z);
         bullet.velocity = new THREE.Vector3(direction.x, direction.y, direction.z);
+        bullet.alive = true;
         
         this.bullets.push(bullet);
         this.scene.add(bullet);

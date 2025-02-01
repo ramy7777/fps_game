@@ -10,6 +10,18 @@ const wss = new WebSocket.Server({ server });
 const games = new Map();
 let nextGameId = 1;
 
+// Available colors for players
+const playerColors = [
+    0xFF4444, // Red
+    0x44FF44, // Green
+    0x4444FF, // Blue
+    0xFFFF44, // Yellow
+    0xFF44FF, // Magenta
+    0x44FFFF, // Cyan
+    0xFF8844, // Orange
+    0x8844FF  // Purple
+];
+
 wss.on('connection', (ws) => {
     let playerId = Math.random().toString(36).substring(7);
     let gameId = null;
@@ -20,15 +32,21 @@ wss.on('connection', (ws) => {
         switch(data.type) {
             case 'host':
                 gameId = nextGameId++;
+                const hostColor = playerColors[0];
                 games.set(gameId, {
-                    host: ws,
-                    players: new Map([[playerId, ws]]),
-                    positions: new Map([[playerId, data.position]])
+                    host: playerId,
+                    players: new Map([[playerId, {
+                        ws,
+                        color: hostColor
+                    }]]),
+                    positions: new Map([[playerId, data.position]]),
+                    nextColorIndex: 1
                 });
                 ws.send(JSON.stringify({
                     type: 'gameCreated',
                     gameId: gameId,
-                    playerId: playerId
+                    playerId: playerId,
+                    color: hostColor
                 }));
                 break;
 
@@ -36,27 +54,43 @@ wss.on('connection', (ws) => {
                 const game = games.get(data.gameId);
                 if (game) {
                     gameId = data.gameId;
-                    game.players.set(playerId, ws);
-                    game.positions.set(playerId, data.position);
+                    const playerColor = playerColors[game.nextColorIndex % playerColors.length];
+                    game.nextColorIndex++;
                     
-                    // Notify host of new player
-                    game.host.send(JSON.stringify({
-                        type: 'playerJoined',
-                        playerId: playerId,
-                        position: data.position
-                    }));
+                    game.players.set(playerId, {
+                        ws,
+                        color: playerColor
+                    });
+                    game.positions.set(playerId, data.position);
 
-                    // Send existing players to new player
-                    const players = Array.from(game.positions.entries())
+                    // Send existing players to new player first
+                    const existingPlayers = Array.from(game.players.entries())
                         .filter(([id]) => id !== playerId)
-                        .map(([id, pos]) => ({id, position: pos}));
+                        .map(([id, player]) => ({
+                            id,
+                            position: game.positions.get(id),
+                            color: player.color
+                        }));
                     
                     ws.send(JSON.stringify({
                         type: 'gameJoined',
                         gameId: gameId,
                         playerId: playerId,
-                        players: players
+                        color: playerColor,
+                        players: existingPlayers
                     }));
+
+                    // Then notify all existing players about the new player
+                    game.players.forEach((player, id) => {
+                        if (id !== playerId) {
+                            player.ws.send(JSON.stringify({
+                                type: 'playerJoined',
+                                playerId: playerId,
+                                position: data.position,
+                                color: playerColor
+                            }));
+                        }
+                    });
                 }
                 break;
 
@@ -66,9 +100,9 @@ wss.on('connection', (ws) => {
                     currentGame.positions.set(playerId, data.position);
                     
                     // Broadcast position to all other players
-                    currentGame.players.forEach((playerWs, id) => {
+                    currentGame.players.forEach((player, id) => {
                         if (id !== playerId) {
-                            playerWs.send(JSON.stringify({
+                            player.ws.send(JSON.stringify({
                                 type: 'playerMoved',
                                 playerId: playerId,
                                 position: data.position
@@ -81,14 +115,16 @@ wss.on('connection', (ws) => {
             case 'shoot':
                 const shootGame = games.get(gameId);
                 if (shootGame) {
+                    const shooterData = shootGame.players.get(playerId);
                     // Broadcast shot to all other players
-                    shootGame.players.forEach((playerWs, id) => {
+                    shootGame.players.forEach((player, id) => {
                         if (id !== playerId) {
-                            playerWs.send(JSON.stringify({
+                            player.ws.send(JSON.stringify({
                                 type: 'playerShot',
                                 playerId: playerId,
                                 position: data.position,
-                                direction: data.direction
+                                direction: data.direction,
+                                color: shooterData.color
                             }));
                         }
                     });
@@ -104,8 +140,8 @@ wss.on('connection', (ws) => {
             game.positions.delete(playerId);
 
             // Notify remaining players
-            game.players.forEach((playerWs) => {
-                playerWs.send(JSON.stringify({
+            game.players.forEach((player) => {
+                player.ws.send(JSON.stringify({
                     type: 'playerLeft',
                     playerId: playerId
                 }));
