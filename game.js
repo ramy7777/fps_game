@@ -335,6 +335,10 @@ class Game {
                     this.gameId = data.gameId;
                     this.playerId = data.playerId;
                     this.playerColor = data.color;
+                    // Update character color
+                    if (this.character && this.character.material) {
+                        this.character.material.color.setHex(this.playerColor);
+                    }
                     this.gameIdDisplay.textContent = `Game ID: ${this.gameId}`;
                     this.gameIdDisplay.style.display = 'block';
                     break;
@@ -343,15 +347,34 @@ class Game {
                     this.gameId = data.gameId;
                     this.playerId = data.playerId;
                     this.playerColor = data.color;
+                    // Update character color
+                    if (this.character && this.character.material) {
+                        this.character.material.color.setHex(this.playerColor);
+                    }
                     
                     // Clear any existing players first
                     Array.from(this.otherPlayers.keys()).forEach(id => {
                         this.removeOtherPlayer(id);
                     });
                     
-                    // Create other players
+                    // Create other players with their correct colors
                     data.players.forEach(player => {
                         this.createOtherPlayer(player.id, player.position, player.color);
+                    });
+                    break;
+
+                case 'gameState':
+                    // Update all player states including colors
+                    data.players.forEach(player => {
+                        if (player.id !== this.playerId) {
+                            const existingPlayer = this.otherPlayers.get(player.id);
+                            if (existingPlayer) {
+                                existingPlayer.mesh.position.set(player.position.x, player.position.y, player.position.z);
+                                existingPlayer.mesh.material.color.setHex(player.color);
+                            } else {
+                                this.createOtherPlayer(player.id, player.position, player.color);
+                            }
+                        }
                     });
                     break;
 

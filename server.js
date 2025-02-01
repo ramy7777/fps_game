@@ -22,6 +22,24 @@ const playerColors = [
     0x8844FF  // Purple
 ];
 
+function broadcastGameState(gameId) {
+    const game = games.get(gameId);
+    if (!game) return;
+
+    const gameState = {
+        type: 'gameState',
+        players: Array.from(game.players.entries()).map(([id, data]) => ({
+            id,
+            position: game.positions.get(id),
+            color: data.color
+        }))
+    };
+
+    game.players.forEach((player) => {
+        player.ws.send(JSON.stringify(gameState));
+    });
+}
+
 wss.on('connection', (ws) => {
     let playerId = Math.random().toString(36).substring(7);
     let gameId = null;
@@ -34,7 +52,7 @@ wss.on('connection', (ws) => {
                 gameId = nextGameId++;
                 const hostColor = playerColors[0];
                 games.set(gameId, {
-                    host: playerId,
+                    hostId: playerId,
                     players: new Map([[playerId, {
                         ws,
                         color: hostColor
@@ -57,40 +75,46 @@ wss.on('connection', (ws) => {
                     const playerColor = playerColors[game.nextColorIndex % playerColors.length];
                     game.nextColorIndex++;
                     
+                    // Add new player
                     game.players.set(playerId, {
                         ws,
                         color: playerColor
                     });
                     game.positions.set(playerId, data.position);
 
-                    // Send existing players to new player first
-                    const existingPlayers = Array.from(game.players.entries())
+                    // Send game state to new player
+                    const currentPlayers = Array.from(game.players.entries())
                         .filter(([id]) => id !== playerId)
                         .map(([id, player]) => ({
                             id,
                             position: game.positions.get(id),
-                            color: player.color
+                            color: player.color,
+                            isHost: id === game.hostId
                         }));
-                    
+
                     ws.send(JSON.stringify({
                         type: 'gameJoined',
                         gameId: gameId,
                         playerId: playerId,
                         color: playerColor,
-                        players: existingPlayers
+                        players: currentPlayers
                     }));
 
-                    // Then notify all existing players about the new player
+                    // Notify all existing players about the new player
                     game.players.forEach((player, id) => {
                         if (id !== playerId) {
                             player.ws.send(JSON.stringify({
                                 type: 'playerJoined',
                                 playerId: playerId,
                                 position: data.position,
-                                color: playerColor
+                                color: playerColor,
+                                isHost: false
                             }));
                         }
                     });
+
+                    // Broadcast full game state to ensure synchronization
+                    broadcastGameState(gameId);
                 }
                 break;
 
@@ -115,8 +139,8 @@ wss.on('connection', (ws) => {
             case 'shoot':
                 const shootGame = games.get(gameId);
                 if (shootGame) {
-                    const shooterData = shootGame.players.get(playerId);
-                    // Broadcast shot to all other players
+                    const shooter = shootGame.players.get(playerId);
+                    // Broadcast shot to all other players with correct color
                     shootGame.players.forEach((player, id) => {
                         if (id !== playerId) {
                             player.ws.send(JSON.stringify({
@@ -124,7 +148,7 @@ wss.on('connection', (ws) => {
                                 playerId: playerId,
                                 position: data.position,
                                 direction: data.direction,
-                                color: shooterData.color
+                                color: shooter.color
                             }));
                         }
                     });
@@ -150,6 +174,9 @@ wss.on('connection', (ws) => {
             // Clean up empty games
             if (game.players.size === 0) {
                 games.delete(gameId);
+            } else {
+                // Broadcast updated game state
+                broadcastGameState(gameId);
             }
         }
     });
