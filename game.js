@@ -128,6 +128,10 @@ class Game {
         this.gameId = null;
         this.playerColor = null;
 
+        // Wall management
+        this.activeWalls = new Set(); // Track active walls
+        this.wallDistance = 20; // Distance at which wall appears
+
         // Show menu on start
         this.menu.style.display = 'block';
 
@@ -366,47 +370,79 @@ class Game {
         }
     }
 
-    generateChunk(chunkZ) {
-        if (this.activeChunks.has(chunkZ)) return;
-        
-        const groundTexture = this.textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/terrain/grasslight-big.jpg');
-        groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
-        groundTexture.repeat.set(25, 25);
-        groundTexture.encoding = THREE.sRGBEncoding;
+    createWall(x, z) {
+        // Check if wall already exists at this position
+        const wallKey = `${x},${z}`;
+        if (this.activeWalls.has(wallKey)) {
+            return;
+        }
 
-        const groundGeometry = new THREE.PlaneGeometry(100, this.chunkSize);
-        const groundMaterial = new THREE.MeshStandardMaterial({ 
-            map: groundTexture,
-            roughness: 0.8,
-            metalness: 0.2
-        });
+        const wallHeight = 4;      // Height in cubes
+        const floorWidth = 100;    // Width of the floor
+        const cubeSize = 2;        // Size of each cube
+        const wallWidth = Math.floor(floorWidth / cubeSize);  // Number of cubes to span floor width
         
-        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-        ground.rotation.x = -Math.PI / 2;
-        ground.position.z = chunkZ * this.chunkSize + this.chunkSize / 2;
-        ground.receiveShadow = true;
-        this.scene.add(ground);
+        // Create a group to hold all wall cubes
+        const wallGroup = new THREE.Group();
+        wallGroup.position.set(x, 0, z);
+        wallGroup.name = wallKey;
         
-        // Add random obstacles
-        for (let i = 0; i < 10; i++) {
-            const obstacleGeometry = new THREE.BoxGeometry(
-                Math.random() * 2 + 1,
-                Math.random() * 3 + 1,
-                Math.random() * 2 + 1
-            );
-            const obstacleMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
-            const obstacle = new THREE.Mesh(obstacleGeometry, obstacleMaterial);
-            
-            obstacle.position.x = Math.random() * 80 - 40;
-            obstacle.position.y = obstacle.geometry.parameters.height / 2;
-            obstacle.position.z = chunkZ * this.chunkSize + Math.random() * this.chunkSize;
-            
-            obstacle.castShadow = true;
-            obstacle.receiveShadow = true;
-            this.scene.add(obstacle);
+        // Create the wall grid
+        for (let row = 0; row < wallHeight; row++) {
+            for (let col = 0; col < wallWidth; col++) {
+                const cube = new THREE.Mesh(
+                    new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize),
+                    new THREE.MeshPhongMaterial({
+                        color: 0x808080,
+                        shininess: 30,
+                        specular: 0x444444
+                    })
+                );
+                
+                // Position each cube in the grid
+                cube.position.set(
+                    -(floorWidth / 2) + (col * cubeSize) + cubeSize/2,
+                    row * cubeSize + cubeSize/2,
+                    0
+                );
+                
+                cube.castShadow = true;
+                cube.receiveShadow = true;
+                
+                wallGroup.add(cube);
+            }
         }
         
-        this.activeChunks.add(chunkZ);
+        this.scene.add(wallGroup);
+        this.activeWalls.add(wallKey);
+        return wallGroup;
+    }
+
+    updateWalls() {
+        if (!this.character) return;
+
+        // Calculate the next wall position based on player's position
+        const playerZ = this.character.position.z;
+        const nextWallZ = Math.floor((playerZ + this.wallDistance) / this.chunkSize) * this.chunkSize;
+
+        // Create wall if player is close enough
+        const distanceToWall = nextWallZ - playerZ;
+        if (distanceToWall <= this.wallDistance) {
+            this.createWall(0, nextWallZ);
+        }
+
+        // Clean up old walls
+        for (const wallKey of this.activeWalls) {
+            const [x, z] = wallKey.split(',').map(Number);
+            if (z < playerZ - this.chunkSize) {
+                // Find and remove the wall group
+                const wallGroup = this.scene.getObjectByName(wallKey);
+                if (wallGroup) {
+                    this.scene.remove(wallGroup);
+                    this.activeWalls.delete(wallKey);
+                }
+            }
+        }
     }
 
     setupLighting() {
@@ -913,7 +949,51 @@ class Game {
         this.updateCrosshair();
         this.updateCharacter();
         this.updateBullets();
+        this.updateWalls();
         this.renderer.render(this.scene, this.camera);
+    }
+
+    generateChunk(chunkZ) {
+        if (this.activeChunks.has(chunkZ)) return;
+
+        const groundTexture = this.textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/terrain/grasslight-big.jpg');
+        groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
+        groundTexture.repeat.set(25, 25);
+        groundTexture.encoding = THREE.sRGBEncoding;
+
+        const groundGeometry = new THREE.PlaneGeometry(100, this.chunkSize);
+        const groundMaterial = new THREE.MeshStandardMaterial({ 
+            map: groundTexture,
+            roughness: 0.8,
+            metalness: 0.2
+        });
+        
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.z = chunkZ * this.chunkSize + this.chunkSize / 2;
+        ground.receiveShadow = true;
+        this.scene.add(ground);
+        
+        // Add random obstacles
+        for (let i = 0; i < 10; i++) {
+            const obstacleGeometry = new THREE.BoxGeometry(
+                Math.random() * 2 + 1,
+                Math.random() * 3 + 1,
+                Math.random() * 2 + 1
+            );
+            const obstacleMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+            const obstacle = new THREE.Mesh(obstacleGeometry, obstacleMaterial);
+            
+            obstacle.position.x = Math.random() * 80 - 40;
+            obstacle.position.y = obstacle.geometry.parameters.height / 2;
+            obstacle.position.z = chunkZ * this.chunkSize + Math.random() * this.chunkSize;
+            
+            obstacle.castShadow = true;
+            obstacle.receiveShadow = true;
+            this.scene.add(obstacle);
+        }
+        
+        this.activeChunks.add(chunkZ);
     }
 }
 
