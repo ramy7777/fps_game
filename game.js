@@ -45,6 +45,16 @@ class Game {
         this.moveLeft = false;
         this.moveRight = false;
         this.canShoot = true;
+
+        // Spawn points
+        this.spawnPoints = [
+            new THREE.Vector3(5, 1, 5),    // Front right
+            new THREE.Vector3(-5, 1, 5),   // Front left
+            new THREE.Vector3(5, 1, -5),   // Back right
+            new THREE.Vector3(-5, 1, -5),  // Back left
+        ];
+
+        // Bullets
         this.bullets = [];
 
         // Multiplayer properties
@@ -204,26 +214,40 @@ class Game {
     }
 
     createCharacter() {
-        // Character body
-        const bodyGeometry = new THREE.BoxGeometry(1, 1.5, 1);
-        const bodyMaterial = new THREE.MeshPhongMaterial({ 
-            color: 0x3366ff,
-            specular: 0x111111,
-            shininess: 30
-        });
-        this.character = new THREE.Mesh(bodyGeometry, bodyMaterial);
-        this.character.position.y = 0.75;
+        const geometry = new THREE.BoxGeometry(0.5, 1, 0.5);
+        const material = new THREE.MeshPhongMaterial({ color: 0x00ff00 });
+        this.character = new THREE.Mesh(geometry, material);
         this.character.castShadow = true;
         this.character.receiveShadow = true;
-
-        // Add gun model
-        const gunGeometry = new THREE.BoxGeometry(0.1, 0.1, 0.4);
-        const gunMaterial = new THREE.MeshPhongMaterial({ color: 0x222222 });
-        const gun = new THREE.Mesh(gunGeometry, gunMaterial);
-        gun.position.set(0.3, 0.2, -0.3);
-        this.character.add(gun);
-
+        
+        // Set initial position
+        this.character.position.set(0, 1, 0); // Start at center
+        
         this.scene.add(this.character);
+        
+        // After adding to scene, move to random spawn point
+        setTimeout(() => {
+            if (this.character && this.spawnPoints) {
+                const randomIndex = Math.floor(Math.random() * this.spawnPoints.length);
+                const spawnPoint = this.spawnPoints[randomIndex];
+                this.character.position.copy(spawnPoint);
+            }
+        }, 100);
+    }
+
+    getRandomSpawnPoint() {
+        if (!this.spawnPoints || this.spawnPoints.length === 0) {
+            return new THREE.Vector3(0, 1, 0);
+        }
+        const randomIndex = Math.floor(Math.random() * this.spawnPoints.length);
+        return this.spawnPoints[randomIndex].clone();
+    }
+
+    respawnCharacter() {
+        if (!this.character) return;
+        const spawnPoint = this.getRandomSpawnPoint();
+        this.character.position.copy(spawnPoint);
+        this.velocity.set(0, 0, 0); // Reset velocity
     }
 
     setupLighting() {
@@ -417,16 +441,16 @@ class Game {
                     break;
 
                 case 'playerEliminated':
-                    if (data.playerId === this.playerId) {
-                        this.showDeathScreen();
-                        this.canShoot = false;
-                        this.character.material.transparent = true;
-                        this.character.material.opacity = 0.5;
+                    if (data.targetId === this.playerId) {
+                        this.showDeathScreen(data.shooterId);
+                        // Respawn at random location
+                        this.respawnCharacter();
                     } else {
-                        const player = this.otherPlayers.get(data.playerId);
-                        if (player) {
-                            player.mesh.material.transparent = true;
-                            player.mesh.material.opacity = 0.3;
+                        // Another player was hit
+                        const playerData = this.otherPlayers.get(data.targetId);
+                        if (playerData && playerData.mesh) {
+                            // Respawn other player at random location
+                            playerData.mesh.position.copy(this.getRandomSpawnPoint());
                         }
                     }
                     break;
@@ -479,22 +503,24 @@ class Game {
     }
 
     createOtherPlayer(playerId, position, color) {
-        // Remove any existing player with this ID first
-        this.removeOtherPlayer(playerId);
-        
-        const geometry = new THREE.BoxGeometry(1, 2, 1);
-        const material = new THREE.MeshPhongMaterial({ 
-            color: color || 0xff0000,
-            shininess: 30
-        });
+        const geometry = new THREE.BoxGeometry(0.5, 1, 0.5);
+        const material = new THREE.MeshPhongMaterial({ color: color || 0xff0000 });
         const player = new THREE.Mesh(geometry, material);
+        player.castShadow = true;
+        player.receiveShadow = true;
         
-        player.position.set(position.x, position.y, position.z);
+        // Use provided position or get random spawn point
+        if (position) {
+            player.position.copy(position);
+        } else {
+            player.position.copy(this.getRandomSpawnPoint());
+        }
+        
         this.scene.add(player);
-        this.otherPlayers.set(playerId, {
-            mesh: player,
-            color: color
-        });
+        this.otherPlayers.set(playerId, { mesh: player });
+        
+        // Create health bar for the new player
+        this.createHealthBar(playerId);
     }
 
     removeOtherPlayer(playerId) {
@@ -514,10 +540,7 @@ class Game {
 
     handleOtherPlayerShot(playerId, position, direction, color) {
         const bulletGeometry = new THREE.SphereGeometry(0.2);
-        const bulletMaterial = new THREE.MeshPhongMaterial({ 
-            color: color || 0xff0000,
-            shininess: 30
-        });
+        const bulletMaterial = new THREE.MeshPhongMaterial({ color: color || 0xff0000 });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
         
         bullet.position.set(position.x, position.y, position.z);

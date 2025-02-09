@@ -42,6 +42,15 @@ function broadcastGameState(gameId) {
     });
 }
 
+function broadcastToGame(gameId, message) {
+    const game = games.get(gameId);
+    if (game) {
+        game.players.forEach((player) => {
+            player.ws.send(message);
+        });
+    }
+}
+
 // Add connection health monitoring
 const interval = setInterval(() => {
     wss.clients.forEach((ws) => {
@@ -190,33 +199,13 @@ wss.on('connection', (ws) => {
                     break;
 
                 case 'hit':
-                    console.log(`\n=== HIT PROCESSING START ===`);
-                    console.log(`Attacker: ${playerId}, Target: ${data.targetId}`);
-                    const hitGame = games.get(gameId);
-                    if (hitGame) {
-                        console.log(`Game ${gameId} has ${hitGame.players.size} players`);
-                        const targetPlayer = hitGame.players.get(data.targetId);
-                        if (targetPlayer) {
-                            console.log(`Target ${data.targetId} health: ${targetPlayer.health} -> ${targetPlayer.health - 25}`);
-                            targetPlayer.health -= 25;
-                            
-                            if (targetPlayer.health <= 0) {
-                                targetPlayer.isAlive = false;
-                                console.log(`Player ${data.targetId} eliminated`);
-                                hitGame.players.forEach(player => {
-                                    player.ws.send(JSON.stringify({
-                                        type: 'playerEliminated',
-                                        playerId: data.targetId,
-                                        eliminatorId: playerId,
-                                        isAlive: false
-                                    }));
-                                });
-                            }
-                            
-                            // Broadcast updated game state
-                            broadcastGameState(gameId);
-                        }
-                    }
+                    // Broadcast hit to all players
+                    const hitMessage = JSON.stringify({
+                        type: 'playerEliminated',
+                        targetId: data.targetId,
+                        shooterId: playerId
+                    });
+                    broadcastToGame(gameId, hitMessage);
                     break;
             }
             
