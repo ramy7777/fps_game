@@ -3,6 +3,11 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 class Game {
     constructor() {
+        // Initialize properties
+        this.bullets = [];
+        this.otherPlayers = new Map();
+        this.healthBars = new Map();
+
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -45,12 +50,10 @@ class Game {
         this.moveLeft = false;
         this.moveRight = false;
         this.canShoot = true;
-        this.bullets = [];
 
         // Multiplayer properties
         this.ws = null;
         this.playerId = null;
-        this.otherPlayers = new Map();
         this.gameId = null;
         this.playerColor = null;
 
@@ -87,6 +90,29 @@ class Game {
         this.renderer.domElement.addEventListener('click', () => {
             this.renderer.domElement.requestPointerLock();
         });
+
+        // Add health bar styles
+        const style = document.createElement('style');
+        style.textContent = `
+            .health-bar-container {
+                position: fixed;
+                width: 100px;
+                height: 10px;
+                background-color: #ff0000;
+                border: 2px solid #000;
+                pointer-events: none;
+            }
+            .health-bar {
+                width: 100%;
+                height: 100%;
+                background-color: #00ff00;
+                transition: width 0.3s ease;
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Create crosshair
+        this.createCrosshair();
     }
 
     onMouseMove(event) {
@@ -110,61 +136,38 @@ class Game {
 
     shoot() {
         if (!this.canShoot) return;
-
-        // Create bullet with player's color
-        const bulletGeometry = new THREE.SphereGeometry(0.2); 
-        const bulletMaterial = new THREE.MeshPhongMaterial({ 
-            color: this.playerColor || 0xff0000,
-            shininess: 30
-        });
+        
+        // Create smaller bullet for better precision
+        const bulletGeometry = new THREE.SphereGeometry(0.05);
+        const bulletMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
-
-        // Set bullet spawn position
-        bullet.position.copy(this.character.position);
-        bullet.position.y += 0.8;
-
-        // Get character's forward direction for straight trajectory
-        const direction = new THREE.Vector3(0, 0, -1);
-        direction.applyQuaternion(this.character.quaternion);
         
-        // Add the same left offset as crosshair
-        const right = new THREE.Vector3(-0.08, 0, 0);
-        right.applyQuaternion(this.character.quaternion);
-        direction.add(right.multiplyScalar(0.02));
+        // Set bullet position to crosshair position
+        bullet.position.copy(this.crosshair.position);
         
-        // Set bullet velocity for straight path
-        bullet.velocity = direction.normalize().multiplyScalar(1.5);
+        // Calculate direction from camera to bullet spawn point
+        const direction = new THREE.Vector3();
+        direction.subVectors(this.crosshair.position, this.camera.position).normalize();
+        
+        // Set velocity
+        bullet.velocity = direction.multiplyScalar(0.8);
         bullet.alive = true;
+        bullet.lifeTime = 100;
         
-        this.bullets.push(bullet);
         this.scene.add(bullet);
+        this.bullets.push(bullet);
         
-        // Send shot information to server
+        // Send bullet data to server
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
                 type: 'shoot',
-                position: {
-                    x: bullet.position.x,
-                    y: bullet.position.y,
-                    z: bullet.position.z
-                },
-                direction: {
-                    x: bullet.velocity.x,
-                    y: bullet.velocity.y,
-                    z: bullet.velocity.z
-                }
+                position: bullet.position.toArray(),
+                velocity: bullet.velocity.toArray(),
+                gameId: this.gameId
             }));
         }
         
-        setTimeout(() => {
-            bullet.alive = false;
-            this.scene.remove(bullet);
-            const index = this.bullets.indexOf(bullet);
-            if (index > -1) {
-                this.bullets.splice(index, 1);
-            }
-        }, 2000);
-
+        // Add cooldown
         this.canShoot = false;
         setTimeout(() => {
             this.canShoot = true;
@@ -189,7 +192,7 @@ class Game {
         const groundTexture = this.textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/terrain/grasslight-big.jpg');
         groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
         groundTexture.repeat.set(25, 25);
-        groundTexture.encoding = THREE.sRGBEncoding;
+        groundTexture.colorSpace = THREE.SRGBColorSpace;
 
         const groundGeometry = new THREE.PlaneGeometry(100, 100);
         const groundMaterial = new THREE.MeshStandardMaterial({ 
@@ -224,6 +227,9 @@ class Game {
         this.character.add(gun);
 
         this.scene.add(this.character);
+        
+        // Create health bar for local player
+        this.createHealthBar(this.playerId, 100);
     }
 
     setupLighting() {
@@ -430,6 +436,12 @@ class Game {
                         }
                     }
                     break;
+                case 'shoot':
+                    this.handleShoot(data);
+                    break;
+                case 'position':
+                    this.handlePositionUpdate(data);
+                    break;
             }
         };
     }
@@ -495,9 +507,15 @@ class Game {
             mesh: player,
             color: color
         });
+        
+        // Create health bar for other player
+        this.createHealthBar(playerId, 100);
     }
 
     removeOtherPlayer(playerId) {
+        // Remove health bar
+        this.removeHealthBar(playerId);
+        
         const playerData = this.otherPlayers.get(playerId);
         if (playerData) {
             this.scene.remove(playerData.mesh);
@@ -540,12 +558,6 @@ class Game {
             const player = this.otherPlayers.get(id).mesh;
             const distance = player.position.distanceTo(bullet.position);
             if (distance < 1.5) {
-                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    console.log(`[HIT] Sending hit event for ${id}`);
-                    this.ws.send(JSON.stringify({ type: 'hit', targetId: id }));
-                } else {
-                    console.warn('Cannot send hit - WebSocket connection closed');
-                }
                 bullet.alive = false;
                 this.scene.remove(bullet);
             }
@@ -554,6 +566,66 @@ class Game {
 
     showDeathScreen() {
         // Implement death screen UI here
+    }
+
+    createHealthBar(playerId, initialHealth = 100) {
+        const container = document.createElement('div');
+        container.className = 'health-bar-container';
+        container.id = `health-${playerId}`;
+        
+        const bar = document.createElement('div');
+        bar.className = 'health-bar';
+        container.appendChild(bar);
+        
+        document.body.appendChild(container);
+        this.healthBars.set(playerId, container);
+        this.updateHealthBar(playerId, initialHealth);
+    }
+
+    updateHealthBar(playerId, health) {
+        const container = this.healthBars.get(playerId);
+        if (container) {
+            const bar = container.querySelector('.health-bar');
+            bar.style.width = `${Math.max(0, Math.min(100, health))}%`;
+        }
+    }
+
+    removeHealthBar(playerId) {
+        const container = this.healthBars.get(playerId);
+        if (container) {
+            container.remove();
+            this.healthBars.delete(playerId);
+        }
+    }
+
+    updateHealthBarPositions() {
+        // Update position for local player
+        if (this.character) {
+            const pos = this.character.position.clone();
+            pos.y += 2; // Position above player's head
+            const screenPosition = pos.project(this.camera);
+            
+            const container = this.healthBars.get(this.playerId);
+            if (container) {
+                const x = (screenPosition.x + 1) * window.innerWidth / 2 - 50;
+                const y = (-screenPosition.y + 1) * window.innerHeight / 2;
+                container.style.transform = `translate(${x}px, ${y}px)`;
+            }
+        }
+
+        // Update positions for other players
+        this.otherPlayers.forEach((playerData, id) => {
+            const container = this.healthBars.get(id);
+            if (container && playerData.mesh) {
+                const pos = playerData.mesh.position.clone();
+                pos.y += 2; // Position above player's head
+                const screenPosition = pos.project(this.camera);
+                
+                const x = (screenPosition.x + 1) * window.innerWidth / 2 - 50;
+                const y = (-screenPosition.y + 1) * window.innerHeight / 2;
+                container.style.transform = `translate(${x}px, ${y}px)`;
+            }
+        });
     }
 
     updateCharacter() {
@@ -625,63 +697,132 @@ class Game {
         const lookAtPos = this.character.position.clone();
         lookAtPos.y += 1.2;
         
-        // Calculate forward and right vectors for crosshair position
+        // Calculate forward vector for crosshair position
         const forward = new THREE.Vector3(0, 0, -4);
         forward.applyQuaternion(this.character.quaternion);
         
-        const right = new THREE.Vector3(0.12, 0, 0); 
-        right.applyQuaternion(this.character.quaternion);
-        
-        // Add both vectors to move crosshair forward and right
-        lookAtPos.add(forward).add(right);
+        // Add forward vector to move crosshair forward
+        lookAtPos.add(forward);
         
         // Make camera look at crosshair position
         this.camera.lookAt(lookAtPos);
 
-        // Send position update to server
+        // Send position and rotation update to server
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
-                type: 'update',
-                position: {
-                    x: this.character.position.x,
-                    y: this.character.position.y,
-                    z: this.character.position.z
-                }
+                type: 'position',
+                position: this.character.position,
+                rotation: this.character.rotation.y,
+                gameId: this.gameId
             }));
         }
     }
 
     updateBullets() {
-        for (let bullet of this.bullets) {
+        const bulletsToRemove = [];
+        for (let i = 0; i < this.bullets.length; i++) {
+            const bullet = this.bullets[i];
             if (bullet.alive) {
                 // Update bullet position
                 bullet.position.add(bullet.velocity);
                 
-                for (let id of this.otherPlayers.keys()) {
-                    const player = this.otherPlayers.get(id).mesh;
-                    const distance = player.position.distanceTo(bullet.position);
-                    if (distance < 1.5) {
-                        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                            console.log(`[HIT] Sending hit event for ${id}`);
-                            this.ws.send(JSON.stringify({ type: 'hit', targetId: id }));
-                        } else {
-                            console.warn('Cannot send hit - WebSocket connection closed');
-                        }
-                        bullet.alive = false;
-                        this.scene.remove(bullet);
+                // Check for collisions with other players
+                this.otherPlayers.forEach((playerData, playerId) => {
+                    if (this.checkBulletCollision(bullet, playerData.mesh)) {
+                        // Just remove the bullet on collision, no damage
+                        bulletsToRemove.push(i);
                     }
-                }
+                });
             }
         }
+        bulletsToRemove.forEach(index => {
+            const bullet = this.bullets[index];
+            bullet.alive = false;
+            this.scene.remove(bullet);
+            this.bullets.splice(index, 1);
+        });
+    }
+
+    checkBulletCollision(bullet, player) {
+        const distance = player.position.distanceTo(bullet.position);
+        return distance < 1.5;
+    }
+
+    handlePositionUpdate(data) {
+        const playerData = this.otherPlayers.get(data.playerId);
+        if (playerData) {
+            playerData.mesh.position.copy(data.position);
+            if (data.rotation !== undefined) {
+                playerData.mesh.rotation.y = data.rotation;
+            }
+        }
+    }
+
+    handleShoot(data) {
+        if (data.playerId === this.playerId) return; // Don't create bullet for local player
+        
+        const bulletGeometry = new THREE.SphereGeometry(0.1);
+        const bulletMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+        
+        bullet.position.fromArray(data.position);
+        bullet.velocity = new THREE.Vector3().fromArray(data.velocity);
+        bullet.alive = true;
+        bullet.lifeTime = 100;
+        
+        this.scene.add(bullet);
+        this.bullets.push(bullet);
+    }
+
+    createCrosshair() {
+        // Create crosshair geometry
+        const crosshairSize = 0.015;
+        const crosshairThickness = 0.002;
+        
+        // Horizontal line
+        const horizontalGeometry = new THREE.BoxGeometry(crosshairSize, crosshairThickness, crosshairThickness);
+        const crosshairMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const horizontalLine = new THREE.Mesh(horizontalGeometry, crosshairMaterial);
+        
+        // Vertical line
+        const verticalGeometry = new THREE.BoxGeometry(crosshairThickness, crosshairSize, crosshairThickness);
+        const verticalLine = new THREE.Mesh(verticalGeometry, crosshairMaterial);
+        
+        // Create crosshair container
+        this.crosshair = new THREE.Group();
+        this.crosshair.add(horizontalLine);
+        this.crosshair.add(verticalLine);
+        
+        // Add to scene
+        this.scene.add(this.crosshair);
+    }
+
+    updateCrosshair() {
+        if (!this.crosshair) return;
+        
+        // Position crosshair 3 units in front of camera
+        const crosshairDistance = 3;
+        const vector = new THREE.Vector3(0, 0, -crosshairDistance);
+        vector.applyQuaternion(this.camera.quaternion);
+        this.crosshair.position.copy(this.camera.position).add(vector);
+        
+        // Make crosshair face camera
+        this.crosshair.quaternion.copy(this.camera.quaternion);
     }
 
     animate() {
         requestAnimationFrame(() => this.animate());
         this.updateCharacter();
         this.updateBullets();
+        this.updateCrosshair();
+        
+        // Update health bar positions
+        this.updateHealthBarPositions();
+        
         this.renderer.render(this.scene, this.camera);
     }
 }
 
 // Initialize game
 const game = new Game();
+document.querySelector('script[type="module"]').__game = game;

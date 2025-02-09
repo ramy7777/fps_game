@@ -9,24 +9,6 @@
         canvas { 
             display: block;
         }
-        #crosshair {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%) translateZ(2px);
-            color: rgba(255, 255, 255, 0.8);
-            font-size: 24px;
-            pointer-events: none;
-            user-select: none;
-            z-index: 1000;
-            text-shadow: 
-                -1px -1px 0 #000,  
-                1px -1px 0 #000,
-                -1px 1px 0 #000,
-                1px 1px 0 #000;
-            transform-style: preserve-3d;
-            perspective: 1000px;
-        }
         #menu {
             position: absolute;
             top: 50%;
@@ -107,7 +89,6 @@
     </style>
 </head>
 <body>
-    <div id="crosshair">+</div>
     <div id="menu">
         <h2>Multiplayer FPS</h2>
         <button id="hostButton" class="button">Host Game</button>
@@ -133,23 +114,29 @@
     </script>
     <script type="module" src="game.js"></script>
     <script>
-        // Add elimination listener
-        socket.on('playerEliminated', (data) => {
-          if (data.eliminatedId === socket.id) {
-            // Handle local player death
-            document.getElementById('gameContainer').innerHTML += `
-              <div class="death-screen">
-                <h2>ELIMINATED BY PLAYER ${data.eliminatorId.slice(0,4)}</h2>
-                <p>Waiting for next round...</p>
-              </div>
-            `;
-            // Disable controls
-            window.isAlive = false;
-          }
-          // Remove eliminated player from view
-          const eliminatedElement = document.getElementById(`player-${data.eliminatedId}`);
-          if (eliminatedElement) eliminatedElement.remove();
-        });
+        // Get the WebSocket instance from the game
+        const game = document.querySelector('script[type="module"]').__game;
+        if (game && game.ws) {
+            game.ws.addEventListener('message', (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'playerEliminated') {
+                    if (data.eliminatedId === game.playerId) {
+                        // Handle local player death
+                        document.getElementById('gameContainer').innerHTML += `
+                            <div class="death-screen">
+                                <h2>ELIMINATED BY PLAYER ${data.eliminatorId.slice(0,4)}</h2>
+                                <p>Waiting for next round...</p>
+                            </div>
+                        `;
+                        // Disable controls
+                        window.isAlive = false;
+                    }
+                    // Remove eliminated player from view
+                    const eliminatedElement = document.getElementById(`player-${data.eliminatedId}`);
+                    if (eliminatedElement) eliminatedElement.remove();
+                }
+            });
+        }
     </script>
 </body>
 </html>
