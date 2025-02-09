@@ -62,13 +62,20 @@ class Game {
         document.body.appendChild(this.renderer.domElement);
 
         // Create crosshair point
-        const crosshairGeometry = new THREE.SphereGeometry(0.01, 8, 8);
+        const crosshairGeometry = new THREE.SphereGeometry(0.05, 16, 16); 
         const crosshairMaterial = new THREE.MeshBasicMaterial({
             color: 0xffffff,
+            emissive: 0xffffff,
+            emissiveIntensity: 1,
             transparent: true,
-            opacity: 0.8
+            opacity: 1
         });
         this.crosshairPoint = new THREE.Mesh(crosshairGeometry, crosshairMaterial);
+        
+        // Add a point light to make crosshair more visible
+        const pointLight = new THREE.PointLight(0xffffff, 1, 10);
+        this.crosshairPoint.add(pointLight);
+        
         this.scene.add(this.crosshairPoint);
 
         // Load textures
@@ -163,21 +170,26 @@ class Game {
         if (!this.canShoot || !this.character || !this.crosshairPoint) return;
         
         // Create bullet with better materials
-        const bulletGeometry = new THREE.SphereGeometry(0.05, 8, 8);
+        const bulletGeometry = new THREE.SphereGeometry(0.15, 16, 16); // Increased size and segments
         const bulletMaterial = new THREE.MeshPhongMaterial({
             color: this.playerColor || 0xff0000,
             emissive: this.playerColor || 0xff0000,
-            emissiveIntensity: 0.5,
+            emissiveIntensity: 0.8, // Increased intensity
             shininess: 100
         });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
         
-        // Set bullet position to crosshair point
-        bullet.position.copy(this.crosshairPoint.position);
+        // Set bullet position to character's position but at fixed height
+        bullet.position.copy(this.character.position);
+        bullet.position.y = 0.5; // Same fixed height as crosshair
         
-        // Calculate direction from camera to crosshair
+        // Calculate direction to crosshair (will be perfectly horizontal)
         const direction = new THREE.Vector3();
-        direction.copy(this.crosshairPoint.position).sub(this.camera.position).normalize();
+        direction.copy(this.crosshairPoint.position).sub(bullet.position).normalize();
+        
+        // Ensure the bullet travels perfectly straight
+        direction.y = 0;
+        direction.normalize();
         
         // Set velocity
         bullet.velocity = direction.multiplyScalar(0.8);
@@ -212,15 +224,24 @@ class Game {
     }
 
     updateCrosshair() {
-        if (!this.camera) return;
+        if (!this.camera || !this.character) return;
 
-        // Get camera direction
+        // Get camera forward direction (ignore vertical component for aiming)
         const cameraDirection = new THREE.Vector3(0, 0, -1);
         cameraDirection.applyQuaternion(this.camera.quaternion);
+        cameraDirection.y = 0; // Zero out vertical component
+        cameraDirection.normalize(); // Renormalize after zeroing Y
 
-        // Position the crosshair 2 units in front of the camera
-        this.crosshairPoint.position.copy(this.camera.position);
-        this.crosshairPoint.position.add(cameraDirection.multiplyScalar(2));
+        // Position the crosshair at a fixed height from the floor
+        const FIXED_HEIGHT = 0.5; // Fixed height from floor
+        const FORWARD_DISTANCE = 4; // Increased forward distance
+        
+        // Start from character position
+        this.crosshairPoint.position.copy(this.character.position);
+        // Set absolute height from floor
+        this.crosshairPoint.position.y = FIXED_HEIGHT;
+        // Move forward in the direction player is facing
+        this.crosshairPoint.position.add(cameraDirection.multiplyScalar(FORWARD_DISTANCE));
     }
 
     setupEnvironment() {
@@ -672,8 +693,13 @@ class Game {
             return;
         }
 
-        const bulletGeometry = new THREE.SphereGeometry(0.2);
-        const bulletMaterial = new THREE.MeshPhongMaterial({ color: color || 0xff0000 });
+        const bulletGeometry = new THREE.SphereGeometry(0.15, 16, 16); // Match the new bullet size
+        const bulletMaterial = new THREE.MeshPhongMaterial({
+            color: color || 0xff0000,
+            emissive: color || 0xff0000,
+            emissiveIntensity: 0.8,
+            shininess: 100
+        });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
         
         // Set position and direction using the provided vectors
