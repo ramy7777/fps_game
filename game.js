@@ -3,6 +3,13 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 class Game {
     constructor() {
+        // Initialize core properties first
+        this.activeChunks = new Set();
+        this.chunkSize = 100;
+        this.lastChunkZ = 0;
+        this.autoMoveSpeed = 0.1;
+        this.distanceTraveled = 0;
+
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -38,10 +45,8 @@ class Game {
         this.jumpStartTime = 0;
         this.maxJumpTime = 300; // 0.3 seconds
         this.spacebarPressed = false;
-
+        
         // Game state
-        this.moveForward = false;
-        this.moveBackward = false;
         this.moveLeft = false;
         this.moveRight = false;
         this.canShoot = true;
@@ -176,22 +181,75 @@ class Game {
         const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterials);
         this.scene.add(skybox);
 
-        // Ground
+        // Initial ground chunk
+        this.generateChunk(0);
+    }
+
+    generateChunk(chunkZ) {
+        if (this.activeChunks.has(chunkZ)) return;
+        
         const groundTexture = this.textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/terrain/grasslight-big.jpg');
         groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
         groundTexture.repeat.set(25, 25);
         groundTexture.encoding = THREE.sRGBEncoding;
 
-        const groundGeometry = new THREE.PlaneGeometry(100, 100);
+        const groundGeometry = new THREE.PlaneGeometry(100, this.chunkSize);
         const groundMaterial = new THREE.MeshStandardMaterial({ 
             map: groundTexture,
             roughness: 0.8,
             metalness: 0.2
         });
+        
         const ground = new THREE.Mesh(groundGeometry, groundMaterial);
         ground.rotation.x = -Math.PI / 2;
+        ground.position.z = chunkZ * this.chunkSize + this.chunkSize / 2;
         ground.receiveShadow = true;
         this.scene.add(ground);
+        
+        // Add random obstacles
+        for (let i = 0; i < 10; i++) {
+            const obstacleGeometry = new THREE.BoxGeometry(
+                Math.random() * 2 + 1,
+                Math.random() * 3 + 1,
+                Math.random() * 2 + 1
+            );
+            const obstacleMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+            const obstacle = new THREE.Mesh(obstacleGeometry, obstacleMaterial);
+            
+            obstacle.position.x = Math.random() * 80 - 40;
+            obstacle.position.y = obstacle.geometry.parameters.height / 2;
+            obstacle.position.z = chunkZ * this.chunkSize + Math.random() * this.chunkSize;
+            
+            obstacle.castShadow = true;
+            obstacle.receiveShadow = true;
+            this.scene.add(obstacle);
+        }
+        
+        this.activeChunks.add(chunkZ);
+    }
+
+    updateWorld() {
+        // Calculate current chunk
+        const currentChunkZ = Math.floor(this.character.position.z / this.chunkSize);
+        
+        // Generate new chunks ahead
+        for (let i = 0; i <= 2; i++) {
+            this.generateChunk(currentChunkZ + i);
+        }
+        
+        // Remove chunks that are too far behind
+        for (const chunk of this.activeChunks) {
+            if (chunk < currentChunkZ - 1) {
+                this.activeChunks.delete(chunk);
+                // Remove objects in this chunk (simplified version)
+                this.scene.children = this.scene.children.filter(child => {
+                    if (child.position && child.position.z < chunk * this.chunkSize + this.chunkSize) {
+                        return false;
+                    }
+                    return true;
+                });
+            }
+        }
     }
 
     createCharacter() {
@@ -707,6 +765,38 @@ class Game {
 
     animate() {
         requestAnimationFrame(() => this.animate());
+        
+        if (this.character) {
+            // Apply automatic forward movement
+            this.character.position.z -= this.autoMoveSpeed;
+            this.camera.position.z = this.character.position.z - this.cameraDistance;
+            
+            // Update procedural world generation
+            this.updateWorld();
+            
+            // Handle side movement
+            if (this.moveLeft) {
+                this.character.position.x -= this.autoMoveSpeed;
+            }
+            if (this.moveRight) {
+                this.character.position.x += this.autoMoveSpeed;
+            }
+            
+            // Update camera position
+            const cameraOffset = new THREE.Vector3(
+                0,
+                this.cameraHeight,
+                this.cameraDistance
+            );
+            cameraOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.cameraYaw);
+            this.camera.position.copy(this.character.position).add(cameraOffset);
+            
+            // Update camera look-at
+            const lookAtPos = this.character.position.clone();
+            lookAtPos.y += this.cameraHeight;
+            this.camera.lookAt(lookAtPos);
+        }
+        
         this.updateCharacter();
         this.updateBullets();
         this.renderer.render(this.scene, this.camera);
