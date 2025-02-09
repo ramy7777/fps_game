@@ -177,13 +177,25 @@ wss.on('connection', (ws) => {
                     if (shootGame) {
                         const shooter = shootGame.players.get(playerId);
                         // Broadcast shot to all other players (visual effect only)
-                        broadcastToGame(gameId, {
-                            type: 'playerShot',
-                            playerId: playerId,
-                            position: data.position,
-                            direction: data.direction,
-                            color: shooter.color
-                        }, [playerId]);
+                        shootGame.players.forEach((player, id) => {
+                            if (id !== playerId) {
+                                player.ws.send(JSON.stringify({
+                                    type: 'playerShot',
+                                    playerId: playerId,
+                                    position: {
+                                        x: data.position.x,
+                                        y: data.position.y,
+                                        z: data.position.z
+                                    },
+                                    direction: {
+                                        x: data.direction.x,
+                                        y: data.direction.y,
+                                        z: data.direction.z
+                                    },
+                                    color: shooter.color
+                                }));
+                            }
+                        });
                     }
                     break;
 

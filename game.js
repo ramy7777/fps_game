@@ -180,9 +180,16 @@ class Game {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
                 type: 'shoot',
-                position: bullet.position.toArray(),
-                velocity: bullet.velocity.toArray(),
-                gameId: this.gameId
+                position: {
+                    x: bullet.position.x,
+                    y: bullet.position.y,
+                    z: bullet.position.z
+                },
+                direction: {
+                    x: direction.x,
+                    y: direction.y,
+                    z: direction.z
+                }
             }));
         }
         
@@ -593,12 +600,30 @@ class Game {
     }
 
     handleOtherPlayerShot(playerId, position, direction, color) {
+        // Ensure position and direction are valid
+        if (!position || !direction) {
+            console.error('Invalid position or direction in handleOtherPlayerShot');
+            return;
+        }
+
         const bulletGeometry = new THREE.SphereGeometry(0.2);
         const bulletMaterial = new THREE.MeshPhongMaterial({ color: color || 0xff0000 });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
         
-        bullet.position.set(position.x, position.y, position.z);
-        bullet.velocity = new THREE.Vector3(direction.x, direction.y, direction.z);
+        // Set position and direction using the provided vectors
+        bullet.position.set(
+            position.x || 0,
+            position.y || 0,
+            position.z || 0
+        );
+        
+        const bulletDirection = new THREE.Vector3(
+            direction.x || 0,
+            direction.y || 0,
+            direction.z || 0
+        );
+        
+        bullet.velocity = bulletDirection.multiplyScalar(0.8);
         bullet.alive = true;
         
         this.bullets.push(bullet);
