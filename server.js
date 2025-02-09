@@ -32,9 +32,7 @@ function broadcastGameState(gameId) {
         players: Array.from(game.players.entries()).map(([id, data]) => ({
             id,
             position: game.positions.get(id),
-            color: data.color,
-            health: data.health,
-            isAlive: data.isAlive
+            color: data.color
         }))
     };
 
@@ -43,11 +41,13 @@ function broadcastGameState(gameId) {
     });
 }
 
-function broadcastToGame(gameId, message) {
+function broadcastToGame(gameId, message, excludeIds = []) {
     const game = games.get(gameId);
     if (game) {
-        game.players.forEach((player) => {
-            player.ws.send(message);
+        game.players.forEach((player, id) => {
+            if (!excludeIds.includes(id)) {
+                player.ws.send(JSON.stringify(message));
+            }
         });
     }
 }
@@ -91,9 +91,7 @@ wss.on('connection', (ws) => {
                         hostId: playerId,
                         players: new Map([[playerId, {
                             ws,
-                            color: hostColor,
-                            health: 100,
-                            isAlive: true
+                            color: hostColor
                         }]]),
                         positions: new Map([[playerId, data.position]]),
                         nextColorIndex: 1,
@@ -118,9 +116,7 @@ wss.on('connection', (ws) => {
                         // Add new player
                         game.players.set(playerId, {
                             ws,
-                            color: playerColor,
-                            health: 100,
-                            isAlive: true
+                            color: playerColor
                         });
                         game.positions.set(playerId, data.position);
 
@@ -131,8 +127,6 @@ wss.on('connection', (ws) => {
                                 id,
                                 position: game.positions.get(id),
                                 color: player.color,
-                                health: player.health,
-                                isAlive: player.isAlive,
                                 isHost: id === game.hostId
                             }));
 
@@ -144,23 +138,13 @@ wss.on('connection', (ws) => {
                             players: currentPlayers
                         }));
 
-                        // Notify all existing players about the new player
-                        game.players.forEach((player, id) => {
-                            if (id !== playerId) {
-                                player.ws.send(JSON.stringify({
-                                    type: 'playerJoined',
-                                    playerId: playerId,
-                                    position: data.position,
-                                    color: playerColor,
-                                    health: 100,
-                                    isAlive: true,
-                                    isHost: false
-                                }));
-                            }
-                        });
-
-                        // Broadcast full game state to ensure synchronization
-                        broadcastGameState(gameId);
+                        // Notify other players
+                        broadcastToGame(gameId, {
+                            type: 'playerJoined',
+                            playerId: playerId,
+                            position: data.position,
+                            color: playerColor
+                        }, [playerId]);
                     }
                     break;
 
@@ -168,9 +152,9 @@ wss.on('connection', (ws) => {
                     const gameToStart = games.get(gameId);
                     if (gameToStart && gameToStart.hostId === playerId) {
                         gameToStart.gameStarted = true;
-                        broadcastToGame(gameId, JSON.stringify({
+                        broadcastToGame(gameId, {
                             type: 'gameStarted'
-                        }));
+                        });
                     }
                     break;
 
@@ -180,15 +164,11 @@ wss.on('connection', (ws) => {
                         currentGame.positions.set(playerId, data.position);
                         
                         // Broadcast position to all other players
-                        currentGame.players.forEach((player, id) => {
-                            if (id !== playerId) {
-                                player.ws.send(JSON.stringify({
-                                    type: 'playerMoved',
-                                    playerId: playerId,
-                                    position: data.position
-                                }));
-                            }
-                        });
+                        broadcastToGame(gameId, {
+                            type: 'playerMoved',
+                            playerId: playerId,
+                            position: data.position
+                        }, [playerId]);
                     }
                     break;
 
@@ -196,28 +176,24 @@ wss.on('connection', (ws) => {
                     const shootGame = games.get(gameId);
                     if (shootGame) {
                         const shooter = shootGame.players.get(playerId);
-                        // Broadcast shot to all other players with correct color
-                        shootGame.players.forEach((player, id) => {
-                            if (id !== playerId) {
-                                player.ws.send(JSON.stringify({
-                                    type: 'playerShot',
-                                    playerId: playerId,
-                                    position: data.position,
-                                    direction: data.direction,
-                                    color: shooter.color
-                                }));
-                            }
-                        });
+                        // Broadcast shot to all other players (visual effect only)
+                        broadcastToGame(gameId, {
+                            type: 'playerShot',
+                            playerId: playerId,
+                            position: data.position,
+                            direction: data.direction,
+                            color: shooter.color
+                        }, [playerId]);
                     }
                     break;
 
                 case 'hit':
                     // Broadcast hit to all players
-                    const hitMessage = JSON.stringify({
+                    const hitMessage = {
                         type: 'playerEliminated',
                         targetId: data.targetId,
                         shooterId: playerId
-                    });
+                    };
                     broadcastToGame(gameId, hitMessage);
                     break;
             }
@@ -235,11 +211,9 @@ wss.on('connection', (ws) => {
             game.positions.delete(playerId);
 
             // Notify remaining players
-            game.players.forEach((player) => {
-                player.ws.send(JSON.stringify({
-                    type: 'playerLeft',
-                    playerId: playerId
-                }));
+            broadcastToGame(gameId, {
+                type: 'playerLeft',
+                playerId: playerId
             });
 
             // Clean up empty games

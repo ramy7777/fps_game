@@ -520,24 +520,6 @@ class Game {
                 case 'playerShot':
                     this.handleOtherPlayerShot(message.playerId, message.position, message.direction, message.color);
                     break;
-
-                case 'playerEliminated':
-                    if (message.targetId === this.playerId) {
-                        this.showDeathScreen(message.shooterId);
-                        // Respawn at random location
-                        this.respawnCharacter();
-                    } else {
-                        // Another player was hit
-                        const playerData = this.otherPlayers.get(message.targetId);
-                        if (playerData && playerData.mesh) {
-                            // Respawn other player at random location
-                            playerData.mesh.position.copy(this.getRandomSpawnPoint());
-                        }
-                    }
-                    break;
-                case 'hit':
-                    this.handleHit(message);
-                    break;
             }
         };
     }
@@ -589,22 +571,10 @@ class Game {
     createOtherPlayer(playerId, position, color) {
         const geometry = new THREE.BoxGeometry(0.5, 1, 0.5);
         const material = new THREE.MeshPhongMaterial({ color: color || 0xff0000 });
-        const player = new THREE.Mesh(geometry, material);
-        player.castShadow = true;
-        player.receiveShadow = true;
-        
-        // Use provided position or get random spawn point
-        if (position) {
-            player.position.copy(position);
-        } else {
-            player.position.copy(this.getRandomSpawnPoint());
-        }
-        
-        this.scene.add(player);
-        this.otherPlayers.set(playerId, { mesh: player });
-        
-        // Create health bar for the new player
-        this.createHealthBar(playerId);
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.set(position.x, position.y, position.z);
+        this.scene.add(mesh);
+        this.otherPlayers.set(playerId, { mesh });
     }
 
     removeOtherPlayer(playerId) {
@@ -642,48 +612,15 @@ class Game {
                 this.bullets.splice(index, 1);
             }
         }, 2000);
-        
-        for (let id of this.otherPlayers.keys()) {
-            const player = this.otherPlayers.get(id).mesh;
-            const distance = player.position.distanceTo(bullet.position);
-            if (distance < 1.5) {
-                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    console.log(`[HIT] Sending hit event for ${id}`);
-                    this.ws.send(JSON.stringify({ type: 'hit', targetId: id }));
-                } else {
-                    console.warn('Cannot send hit - WebSocket connection closed');
-                }
-                bullet.alive = false;
-                this.scene.remove(bullet);
-            }
-        }
     }
 
-    handleHit(data) {
-        if (data.targetId === this.playerId) {
-            // Local player was hit
-            this.showDeathScreen(data.shooterId);
-            // Disable shooting temporarily
-            this.canShoot = false;
-            setTimeout(() => {
-                this.canShoot = true;
-            }, 1000); // 1 second cooldown
-        } else {
-            // Another player was hit
-            const playerData = this.otherPlayers.get(data.targetId);
-            if (playerData && playerData.mesh) {
-                // Flash the hit player red
-                const originalColor = playerData.mesh.material.color.clone();
-                playerData.mesh.material.color.setHex(0xff0000);
-                setTimeout(() => {
-                    playerData.mesh.material.color.copy(originalColor);
-                }, 100);
+    updateBullets() {
+        for (let bullet of this.bullets) {
+            if (bullet.alive) {
+                // Update bullet position
+                bullet.position.add(bullet.velocity);
             }
         }
-    }
-
-    showDeathScreen() {
-        // Implement death screen UI here
     }
 
     updateCharacter() {
@@ -757,7 +694,7 @@ class Game {
 
         // Calculate crosshair look position
         const lookAtPos = this.character.position.clone();
-        lookAtPos.y += 1.2;
+        lookAtPos.y += this.cameraHeight;
         
         // Calculate forward and right vectors for crosshair position
         const forward = new THREE.Vector3(0, 0, -4);
@@ -782,30 +719,6 @@ class Game {
                     z: this.character.position.z
                 }
             }));
-        }
-    }
-
-    updateBullets() {
-        for (let bullet of this.bullets) {
-            if (bullet.alive) {
-                // Update bullet position
-                bullet.position.add(bullet.velocity);
-                
-                for (let id of this.otherPlayers.keys()) {
-                    const player = this.otherPlayers.get(id).mesh;
-                    const distance = player.position.distanceTo(bullet.position);
-                    if (distance < 1.5) {
-                        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                            console.log(`[HIT] Sending hit event for ${id}`);
-                            this.ws.send(JSON.stringify({ type: 'hit', targetId: id }));
-                        } else {
-                            console.warn('Cannot send hit - WebSocket connection closed');
-                        }
-                        bullet.alive = false;
-                        this.scene.remove(bullet);
-                    }
-                }
-            }
         }
     }
 
