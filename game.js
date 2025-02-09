@@ -61,6 +61,16 @@ class Game {
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         document.body.appendChild(this.renderer.domElement);
 
+        // Create crosshair point
+        const crosshairGeometry = new THREE.SphereGeometry(0.01, 8, 8);
+        const crosshairMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.8
+        });
+        this.crosshairPoint = new THREE.Mesh(crosshairGeometry, crosshairMaterial);
+        this.scene.add(this.crosshairPoint);
+
         // Load textures
         this.textureLoader = new THREE.TextureLoader();
         
@@ -150,7 +160,7 @@ class Game {
     }
 
     shoot() {
-        if (!this.canShoot || !this.character) return;
+        if (!this.canShoot || !this.character || !this.crosshairPoint) return;
         
         // Create bullet with better materials
         const bulletGeometry = new THREE.SphereGeometry(0.05, 8, 8);
@@ -162,16 +172,12 @@ class Game {
         });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
         
-        // Get the camera's position and direction
-        const cameraDirection = new THREE.Vector3(0, 0, -1);
-        cameraDirection.applyQuaternion(this.camera.quaternion);
+        // Set bullet position to crosshair point
+        bullet.position.copy(this.crosshairPoint.position);
         
-        // Set bullet starting position slightly in front of the camera
-        bullet.position.copy(this.camera.position).add(cameraDirection.multiplyScalar(1));
-        
-        // Calculate bullet direction
+        // Calculate direction from camera to crosshair
         const direction = new THREE.Vector3();
-        direction.copy(cameraDirection).normalize();
+        direction.copy(this.crosshairPoint.position).sub(this.camera.position).normalize();
         
         // Set velocity
         bullet.velocity = direction.multiplyScalar(0.8);
@@ -203,6 +209,18 @@ class Game {
         setTimeout(() => {
             this.canShoot = true;
         }, 250);
+    }
+
+    updateCrosshair() {
+        if (!this.camera) return;
+
+        // Get camera direction
+        const cameraDirection = new THREE.Vector3(0, 0, -1);
+        cameraDirection.applyQuaternion(this.camera.quaternion);
+
+        // Position the crosshair 2 units in front of the camera
+        this.crosshairPoint.position.copy(this.camera.position);
+        this.crosshairPoint.position.add(cameraDirection.multiplyScalar(2));
     }
 
     setupEnvironment() {
@@ -866,6 +884,7 @@ class Game {
             }
         }
         
+        this.updateCrosshair();
         this.updateCharacter();
         this.updateBullets();
         this.renderer.render(this.scene, this.camera);
