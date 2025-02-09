@@ -119,62 +119,43 @@ class Game {
     }
 
     shoot() {
-        if (!this.canShoot) return;
-
-        // Create bullet with player's color
-        const bulletGeometry = new THREE.SphereGeometry(0.2); 
-        const bulletMaterial = new THREE.MeshPhongMaterial({ 
-            color: this.playerColor || 0xff0000,
-            shininess: 30
-        });
+        if (!this.canShoot || !this.character) return;
+        
+        // Create smaller bullet for better precision
+        const bulletGeometry = new THREE.SphereGeometry(0.05);
+        const bulletMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
-
-        // Set bullet spawn position
-        bullet.position.copy(this.character.position);
-        bullet.position.y += 0.8;
-
-        // Get character's forward direction for straight trajectory
-        const direction = new THREE.Vector3(0, 0, -1);
-        direction.applyQuaternion(this.character.quaternion);
         
-        // Add the same left offset as crosshair
-        const right = new THREE.Vector3(-0.08, 0, 0);
-        right.applyQuaternion(this.character.quaternion);
-        direction.add(right.multiplyScalar(0.02));
+        // Get the camera's position and direction
+        const cameraDirection = new THREE.Vector3(0, 0, -1);
+        cameraDirection.applyQuaternion(this.camera.quaternion);
         
-        // Set bullet velocity for straight path
-        bullet.velocity = direction.normalize().multiplyScalar(1.5);
+        // Set bullet starting position slightly in front of the camera
+        bullet.position.copy(this.camera.position).add(cameraDirection.multiplyScalar(1));
+        
+        // Calculate bullet direction
+        const direction = new THREE.Vector3();
+        direction.copy(cameraDirection).normalize();
+        
+        // Set velocity
+        bullet.velocity = direction.multiplyScalar(0.8);
         bullet.alive = true;
+        bullet.lifeTime = 100;
         
-        this.bullets.push(bullet);
         this.scene.add(bullet);
+        this.bullets.push(bullet);
         
-        // Send shot information to server
+        // Send bullet data to server
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
                 type: 'shoot',
-                position: {
-                    x: bullet.position.x,
-                    y: bullet.position.y,
-                    z: bullet.position.z
-                },
-                direction: {
-                    x: bullet.velocity.x,
-                    y: bullet.velocity.y,
-                    z: bullet.velocity.z
-                }
+                position: bullet.position.toArray(),
+                velocity: bullet.velocity.toArray(),
+                gameId: this.gameId
             }));
         }
         
-        setTimeout(() => {
-            bullet.alive = false;
-            this.scene.remove(bullet);
-            const index = this.bullets.indexOf(bullet);
-            if (index > -1) {
-                this.bullets.splice(index, 1);
-            }
-        }, 2000);
-
+        // Add cooldown
         this.canShoot = false;
         setTimeout(() => {
             this.canShoot = true;
@@ -454,6 +435,9 @@ class Game {
                         }
                     }
                     break;
+                case 'hit':
+                    this.handleHit(data);
+                    break;
             }
         };
     }
@@ -571,6 +555,29 @@ class Game {
                 }
                 bullet.alive = false;
                 this.scene.remove(bullet);
+            }
+        }
+    }
+
+    handleHit(data) {
+        if (data.targetId === this.playerId) {
+            // Local player was hit
+            this.showDeathScreen(data.shooterId);
+            // Disable shooting temporarily
+            this.canShoot = false;
+            setTimeout(() => {
+                this.canShoot = true;
+            }, 1000); // 1 second cooldown
+        } else {
+            // Another player was hit
+            const playerData = this.otherPlayers.get(data.targetId);
+            if (playerData && playerData.mesh) {
+                // Flash the hit player red
+                const originalColor = playerData.mesh.material.color.clone();
+                playerData.mesh.material.color.setHex(0xff0000);
+                setTimeout(() => {
+                    playerData.mesh.material.color.copy(originalColor);
+                }, 100);
             }
         }
     }
