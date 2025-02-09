@@ -135,19 +135,23 @@ class Game {
     }
 
     shoot() {
-        if (!this.canShoot) return;
+        if (!this.canShoot || !this.character) return;
         
         // Create smaller bullet for better precision
         const bulletGeometry = new THREE.SphereGeometry(0.05);
         const bulletMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
         
-        // Set bullet position to crosshair position
-        bullet.position.copy(this.crosshair.position);
+        // Get the camera's position and direction
+        const cameraDirection = new THREE.Vector3(0, 0, -1);
+        cameraDirection.applyQuaternion(this.camera.quaternion);
         
-        // Calculate direction from camera to bullet spawn point
+        // Set bullet starting position slightly in front of the camera
+        bullet.position.copy(this.camera.position).add(cameraDirection.multiplyScalar(1));
+        
+        // Calculate bullet direction
         const direction = new THREE.Vector3();
-        direction.subVectors(this.crosshair.position, this.camera.position).normalize();
+        direction.copy(cameraDirection).normalize();
         
         // Set velocity
         bullet.velocity = direction.multiplyScalar(0.8);
@@ -441,6 +445,9 @@ class Game {
                     break;
                 case 'position':
                     this.handlePositionUpdate(data);
+                    break;
+                case 'hit':
+                    this.handleHit(data);
                     break;
             }
         };
@@ -772,6 +779,29 @@ class Game {
         
         this.scene.add(bullet);
         this.bullets.push(bullet);
+    }
+
+    handleHit(data) {
+        if (data.targetId === this.playerId) {
+            // Local player was hit
+            this.showDeathScreen(data.shooterId);
+            // Disable shooting temporarily
+            this.canShoot = false;
+            setTimeout(() => {
+                this.canShoot = true;
+            }, 1000); // 1 second cooldown
+        } else {
+            // Another player was hit
+            const playerData = this.otherPlayers.get(data.targetId);
+            if (playerData && playerData.mesh) {
+                // Flash the hit player red
+                const originalColor = playerData.mesh.material.color.clone();
+                playerData.mesh.material.color.setHex(0xff0000);
+                setTimeout(() => {
+                    playerData.mesh.material.color.copy(originalColor);
+                }, 100);
+            }
+        }
     }
 
     createCrosshair() {
