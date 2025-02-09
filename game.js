@@ -162,16 +162,6 @@ class Game {
         });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
         
-        // Add bullet trail
-        const trailGeometry = new THREE.CylinderGeometry(0.02, 0.02, 0.2, 8);
-        const trailMaterial = new THREE.MeshPhongMaterial({
-            color: this.playerColor || 0xff0000,
-            transparent: true,
-            opacity: 0.5
-        });
-        const trail = new THREE.Mesh(trailGeometry, trailMaterial);
-        bullet.add(trail);
-        
         // Get the camera's position and direction
         const cameraDirection = new THREE.Vector3(0, 0, -1);
         cameraDirection.applyQuaternion(this.camera.quaternion);
