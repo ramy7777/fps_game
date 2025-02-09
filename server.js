@@ -28,6 +28,7 @@ function broadcastGameState(gameId) {
 
     const gameState = {
         type: 'gameState',
+        gameStarted: game.gameStarted,
         players: Array.from(game.players.entries()).map(([id, data]) => ({
             id,
             position: game.positions.get(id),
@@ -95,13 +96,15 @@ wss.on('connection', (ws) => {
                             isAlive: true
                         }]]),
                         positions: new Map([[playerId, data.position]]),
-                        nextColorIndex: 1
+                        nextColorIndex: 1,
+                        gameStarted: false
                     });
                     ws.send(JSON.stringify({
                         type: 'gameCreated',
                         gameId: gameId,
                         playerId: playerId,
-                        color: hostColor
+                        color: hostColor,
+                        isHost: true
                     }));
                     break;
 
@@ -158,6 +161,16 @@ wss.on('connection', (ws) => {
 
                         // Broadcast full game state to ensure synchronization
                         broadcastGameState(gameId);
+                    }
+                    break;
+
+                case 'startGame':
+                    const gameToStart = games.get(gameId);
+                    if (gameToStart && gameToStart.hostId === playerId) {
+                        gameToStart.gameStarted = true;
+                        broadcastToGame(gameId, JSON.stringify({
+                            type: 'gameStarted'
+                        }));
                     }
                     break;
 

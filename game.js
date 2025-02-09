@@ -9,6 +9,49 @@ class Game {
         this.lastChunkZ = 0;
         this.autoMoveSpeed = 0.1;
         this.distanceTraveled = 0;
+        this.gameStarted = false;
+        this.isHost = false;
+        this.pendingGameId = null;
+        this.ws = null; // Initialize WebSocket as null
+
+        // Create UI elements
+        this.menu = document.getElementById('menu');
+        this.joinPrompt = document.getElementById('joinPrompt');
+        this.gameIdDisplay = document.getElementById('gameId');
+
+        // Create start button
+        this.startButton = document.createElement('button');
+        this.startButton.textContent = 'Start Game';
+        this.startButton.className = 'button';
+        this.startButton.style.display = 'none';
+        this.startButton.style.position = 'fixed';
+        this.startButton.style.top = '20px';
+        this.startButton.style.left = '50%';
+        this.startButton.style.transform = 'translateX(-50%)';
+        this.startButton.style.zIndex = '1000';
+        document.body.appendChild(this.startButton);
+
+        // Add event listeners
+        document.getElementById('hostButton').addEventListener('click', () => this.hostGame());
+        document.getElementById('joinButton').addEventListener('click', () => {
+            this.menu.style.display = 'none';
+            this.joinPrompt.style.display = 'block';
+        });
+        document.getElementById('confirmJoin').addEventListener('click', () => {
+            const gameId = parseInt(document.getElementById('gameIdInput').value);
+            this.joinGame(gameId);
+        });
+
+        // Add start button click handler
+        this.startButton.addEventListener('click', () => {
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                this.ws.send(JSON.stringify({ type: 'startGame' }));
+                this.startButton.style.display = 'none';
+            }
+        });
+
+        // Setup WebSocket
+        this.setupWebSocket();
 
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -63,35 +106,15 @@ class Game {
         this.bullets = [];
 
         // Multiplayer properties
-        this.ws = null;
         this.playerId = null;
         this.otherPlayers = new Map();
         this.gameId = null;
         this.playerColor = null;
 
-        // UI Elements
-        this.menu = document.getElementById('menu');
-        this.joinPrompt = document.getElementById('joinPrompt');
-        this.gameIdDisplay = document.getElementById('gameId');
-        
         // Show menu on start
         this.menu.style.display = 'block';
 
         // Bind event listeners
-        document.getElementById('hostButton').addEventListener('click', () => this.hostGame());
-        document.getElementById('joinButton').addEventListener('click', () => {
-            this.menu.style.display = 'none';
-            this.joinPrompt.style.display = 'block';
-        });
-        document.getElementById('confirmJoin').addEventListener('click', () => {
-            const gameId = parseInt(document.getElementById('gameIdInput').value);
-            this.joinGame(gameId);
-        });
-
-        // Animation
-        this.animate();
-
-        // Event listeners
         window.addEventListener('resize', () => this.onWindowResize(), false);
         document.addEventListener('keydown', (event) => this.onKeyDown(event));
         document.addEventListener('keyup', (event) => this.onKeyUp(event));
@@ -102,6 +125,9 @@ class Game {
         this.renderer.domElement.addEventListener('click', () => {
             this.renderer.domElement.requestPointerLock();
         });
+
+        // Animation
+        this.animate();
     }
 
     onMouseMove(event) {
@@ -388,24 +414,21 @@ class Game {
     }
 
     setupWebSocket() {
-        this.ws = new WebSocket(`ws://${window.location.host}`);
-        this.reconnectAttempts = 0;
+        this.ws = new WebSocket(`ws://${window.location.hostname}:${window.location.port}`);
 
         this.ws.onopen = () => {
             console.log('WebSocket connected');
-            this.reconnectAttempts = 0;
-            // Start heartbeat
-            this.pingInterval = setInterval(() => {
-                if (this.ws.readyState === WebSocket.OPEN) {
-                    this.ws.send(JSON.stringify({ type: 'ping' }));
-                }
-            }, 25000);
+            // If there's a pending game to join, join it now
+            if (this.pendingGameId !== null) {
+                this.sendJoinRequest(this.pendingGameId);
+                this.pendingGameId = null;
+            }
         };
 
-        this.ws.onclose = (event) => {
-            console.log(`WebSocket closed: ${event.code} ${event.reason}`);
-            clearInterval(this.pingInterval);
-            this.handleReconnection();
+        this.ws.onclose = () => {
+            console.log('WebSocket disconnected');
+            // Attempt to reconnect after a delay
+            setTimeout(() => this.setupWebSocket(), 1000);
         };
 
         this.ws.onerror = (error) => {
@@ -413,49 +436,68 @@ class Game {
         };
 
         this.ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
+            const message = JSON.parse(event.data);
             
-            switch(data.type) {
+            switch(message.type) {
                 case 'gameCreated':
-                    this.gameId = data.gameId;
-                    this.playerId = data.playerId;
-                    this.playerColor = data.color;
+                    this.gameId = message.gameId;
+                    this.playerId = message.playerId;
+                    this.playerColor = message.color;
+                    this.isHost = message.isHost;
+                    
+                    // Show game ID
+                    this.gameIdDisplay.textContent = `Game ID: ${this.gameId}`;
+                    this.gameIdDisplay.style.display = 'block';
+                    
+                    // Show start button only for host
+                    if (this.isHost) {
+                        this.startButton.style.display = 'block';
+                    }
+
                     // Update character color
                     if (this.character && this.character.material) {
                         this.character.material.color.setHex(this.playerColor);
                     }
-                    this.gameIdDisplay.textContent = `Game ID: ${this.gameId}`;
-                    this.gameIdDisplay.style.display = 'block';
                     break;
 
                 case 'gameJoined':
-                    this.gameId = data.gameId;
-                    this.playerId = data.playerId;
-                    this.playerColor = data.color;
+                    this.gameId = message.gameId;
+                    this.playerId = message.playerId;
+                    this.playerColor = message.color;
+                    
+                    // Show game ID
+                    this.gameIdDisplay.textContent = `Game ID: ${this.gameId}`;
+                    this.gameIdDisplay.style.display = 'block';
+
                     // Update character color
                     if (this.character && this.character.material) {
                         this.character.material.color.setHex(this.playerColor);
                     }
                     
-                    // Clear any existing players first
-                    Array.from(this.otherPlayers.keys()).forEach(id => {
-                        this.removeOtherPlayer(id);
-                    });
-                    
-                    // Create other players with their correct colors
-                    data.players.forEach(player => {
+                    // Create other players
+                    message.players.forEach(player => {
                         this.createOtherPlayer(player.id, player.position, player.color);
                     });
                     break;
 
+                case 'gameStarted':
+                    this.gameStarted = true;
+                    break;
+
                 case 'gameState':
-                    // Update all player states including colors
-                    data.players.forEach(player => {
+                    if (message.gameStarted !== undefined) {
+                        this.gameStarted = message.gameStarted;
+                    }
+                    // Update other players
+                    message.players.forEach(player => {
                         if (player.id !== this.playerId) {
                             const existingPlayer = this.otherPlayers.get(player.id);
                             if (existingPlayer) {
-                                existingPlayer.mesh.position.set(player.position.x, player.position.y, player.position.z);
-                                existingPlayer.mesh.material.color.setHex(player.color);
+                                existingPlayer.mesh.position.set(
+                                    player.position.x,
+                                    player.position.y,
+                                    player.position.z
+                                );
                             } else {
                                 this.createOtherPlayer(player.id, player.position, player.color);
                             }
@@ -464,29 +506,29 @@ class Game {
                     break;
 
                 case 'playerJoined':
-                    this.createOtherPlayer(data.playerId, data.position, data.color);
+                    this.createOtherPlayer(message.playerId, message.position, message.color);
                     break;
 
                 case 'playerLeft':
-                    this.removeOtherPlayer(data.playerId);
+                    this.removeOtherPlayer(message.playerId);
                     break;
 
                 case 'playerMoved':
-                    this.updateOtherPlayer(data.playerId, data.position);
+                    this.updateOtherPlayer(message.playerId, message.position);
                     break;
 
                 case 'playerShot':
-                    this.handleOtherPlayerShot(data.playerId, data.position, data.direction, data.color);
+                    this.handleOtherPlayerShot(message.playerId, message.position, message.direction, message.color);
                     break;
 
                 case 'playerEliminated':
-                    if (data.targetId === this.playerId) {
-                        this.showDeathScreen(data.shooterId);
+                    if (message.targetId === this.playerId) {
+                        this.showDeathScreen(message.shooterId);
                         // Respawn at random location
                         this.respawnCharacter();
                     } else {
                         // Another player was hit
-                        const playerData = this.otherPlayers.get(data.targetId);
+                        const playerData = this.otherPlayers.get(message.targetId);
                         if (playerData && playerData.mesh) {
                             // Respawn other player at random location
                             playerData.mesh.position.copy(this.getRandomSpawnPoint());
@@ -494,21 +536,38 @@ class Game {
                     }
                     break;
                 case 'hit':
-                    this.handleHit(data);
+                    this.handleHit(message);
                     break;
             }
         };
     }
 
-    handleReconnection() {
-        if (this.reconnectAttempts < 5) {
-            const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-            console.log(`Reconnecting in ${delay}ms...`);
-            setTimeout(() => {
-                this.reconnectAttempts++;
+    joinGame(gameId) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.sendJoinRequest(gameId);
+        } else {
+            // Store the game ID and wait for connection
+            this.pendingGameId = gameId;
+            // Setup WebSocket if it doesn't exist or is closed
+            if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
                 this.setupWebSocket();
-            }, delay);
+            }
         }
+    }
+
+    sendJoinRequest(gameId) {
+        this.ws.send(JSON.stringify({
+            type: 'join',
+            gameId: gameId,
+            position: this.character ? {
+                x: this.character.position.x,
+                y: this.character.position.y,
+                z: this.character.position.z
+            } : { x: 0, y: 0, z: 0 }
+        }));
+
+        // Hide join prompt
+        this.joinPrompt.style.display = 'none';
     }
 
     hostGame() {
@@ -518,23 +577,6 @@ class Game {
         this.ws.onopen = () => {
             this.ws.send(JSON.stringify({
                 type: 'host',
-                position: {
-                    x: this.character.position.x,
-                    y: this.character.position.y,
-                    z: this.character.position.z
-                }
-            }));
-        };
-    }
-
-    joinGame(gameId) {
-        this.setupWebSocket();
-        this.joinPrompt.style.display = 'none';
-        
-        this.ws.onopen = () => {
-            this.ws.send(JSON.stringify({
-                type: 'join',
-                gameId: gameId,
                 position: {
                     x: this.character.position.x,
                     y: this.character.position.y,
@@ -692,7 +734,11 @@ class Game {
         }
 
         // Calculate camera position
-        const idealOffset = new THREE.Vector3(0, this.cameraHeight, this.cameraDistance);
+        const idealOffset = new THREE.Vector3(
+            0,
+            this.cameraHeight,
+            this.cameraDistance
+        );
         
         // First rotate around Y axis (left/right)
         idealOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.cameraYaw);
@@ -766,8 +812,8 @@ class Game {
     animate() {
         requestAnimationFrame(() => this.animate());
         
-        if (this.character) {
-            // Apply automatic forward movement
+        if (this.character && this.gameStarted) {
+            // Apply automatic forward movement only after game has started
             this.character.position.z -= this.autoMoveSpeed;
             this.camera.position.z = this.character.position.z - this.cameraDistance;
             
@@ -788,13 +834,50 @@ class Game {
                 this.cameraHeight,
                 this.cameraDistance
             );
-            cameraOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.cameraYaw);
-            this.camera.position.copy(this.character.position).add(cameraOffset);
             
-            // Update camera look-at
+            // First rotate around Y axis (left/right)
+            cameraOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.cameraYaw);
+            
+            // Then rotate for pitch (up/down) around the rotated X axis
+            const rightVector = new THREE.Vector3(
+                Math.sin(this.cameraYaw + Math.PI / 2),
+                0,
+                Math.cos(this.cameraYaw + Math.PI / 2)
+            );
+            cameraOffset.applyAxisAngle(rightVector, this.cameraPitch);
+            
+            // Add to character position
+            cameraOffset.add(this.character.position);
+            this.camera.position.copy(cameraOffset);
+
+            // Calculate crosshair look position
             const lookAtPos = this.character.position.clone();
             lookAtPos.y += this.cameraHeight;
+            
+            // Calculate forward and right vectors for crosshair position
+            const forward = new THREE.Vector3(0, 0, -4);
+            forward.applyQuaternion(this.character.quaternion);
+            
+            const right = new THREE.Vector3(0.12, 0, 0); 
+            right.applyQuaternion(this.character.quaternion);
+            
+            // Add both vectors to move crosshair forward and right
+            lookAtPos.add(forward).add(right);
+            
+            // Make camera look at crosshair position
             this.camera.lookAt(lookAtPos);
+
+            // Send position update to server
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                this.ws.send(JSON.stringify({
+                    type: 'update',
+                    position: {
+                        x: this.character.position.x,
+                        y: this.character.position.y,
+                        z: this.character.position.z
+                    }
+                }));
+            }
         }
         
         this.updateCharacter();
