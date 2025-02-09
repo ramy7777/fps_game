@@ -152,10 +152,25 @@ class Game {
     shoot() {
         if (!this.canShoot || !this.character) return;
         
-        // Create smaller bullet for better precision
-        const bulletGeometry = new THREE.SphereGeometry(0.05);
-        const bulletMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        // Create bullet with better materials
+        const bulletGeometry = new THREE.SphereGeometry(0.05, 8, 8);
+        const bulletMaterial = new THREE.MeshPhongMaterial({
+            color: this.playerColor || 0xff0000,
+            emissive: this.playerColor || 0xff0000,
+            emissiveIntensity: 0.5,
+            shininess: 100
+        });
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+        
+        // Add bullet trail
+        const trailGeometry = new THREE.CylinderGeometry(0.02, 0.02, 0.2, 8);
+        const trailMaterial = new THREE.MeshPhongMaterial({
+            color: this.playerColor || 0xff0000,
+            transparent: true,
+            opacity: 0.5
+        });
+        const trail = new THREE.Mesh(trailGeometry, trailMaterial);
+        bullet.add(trail);
         
         // Get the camera's position and direction
         const cameraDirection = new THREE.Vector3(0, 0, -1);
@@ -201,21 +216,125 @@ class Game {
     }
 
     setupEnvironment() {
-        // Skybox
-        const skyboxGeometry = new THREE.BoxGeometry(1000, 1000, 1000);
-        const skyboxMaterials = [
-            new THREE.MeshBasicMaterial({ color: 0x87CEEB, side: THREE.BackSide }), // right
-            new THREE.MeshBasicMaterial({ color: 0x87CEEB, side: THREE.BackSide }), // left
-            new THREE.MeshBasicMaterial({ color: 0x4169E1, side: THREE.BackSide }), // top
-            new THREE.MeshBasicMaterial({ color: 0x87CEEB, side: THREE.BackSide }), // bottom
-            new THREE.MeshBasicMaterial({ color: 0x87CEEB, side: THREE.BackSide }), // front
-            new THREE.MeshBasicMaterial({ color: 0x87CEEB, side: THREE.BackSide })  // back
-        ];
-        const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterials);
-        this.scene.add(skybox);
+        // Add ambient light
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+        this.scene.add(ambientLight);
 
-        // Initial ground chunk
-        this.generateChunk(0);
+        // Add directional light (sun-like)
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(100, 100, 0);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        directionalLight.shadow.camera.near = 0.5;
+        directionalLight.shadow.camera.far = 500;
+        this.scene.add(directionalLight);
+
+        // Add hemisphere light for better ambient lighting
+        const hemisphereLight = new THREE.HemisphereLight(0xffffbb, 0x080820, 0.5);
+        this.scene.add(hemisphereLight);
+
+        // Enable shadows
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+        // Add fog for depth
+        this.scene.fog = new THREE.Fog(0x87ceeb, 0, 100);
+        this.scene.background = new THREE.Color(0x87ceeb);
+
+        // Create skybox
+        const skyGeometry = new THREE.SphereGeometry(500, 32, 32);
+        const skyMaterial = new THREE.MeshBasicMaterial({
+            color: 0x87ceeb,
+            side: THREE.BackSide,
+            fog: false
+        });
+        const sky = new THREE.Mesh(skyGeometry, skyMaterial);
+        this.scene.add(sky);
+    }
+
+    createCharacter() {
+        // Create character with better materials
+        const geometry = new THREE.BoxGeometry(0.5, 1, 0.5);
+        const material = new THREE.MeshPhongMaterial({
+            color: this.playerColor || 0xff0000,
+            shininess: 30,
+            specular: 0x444444
+        });
+        this.character = new THREE.Mesh(geometry, material);
+        this.character.castShadow = true;
+        this.character.receiveShadow = true;
+        this.scene.add(this.character);
+
+        // Add character details (eyes, etc.)
+        const eyeGeometry = new THREE.SphereGeometry(0.05, 16, 16);
+        const eyeMaterial = new THREE.MeshPhongMaterial({
+            color: 0xffffff,
+            shininess: 100,
+            specular: 0xffffff
+        });
+        
+        // Left eye
+        const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+        leftEye.position.set(0.15, 0.25, -0.25);
+        this.character.add(leftEye);
+        
+        // Right eye
+        const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+        rightEye.position.set(-0.15, 0.25, -0.25);
+        this.character.add(rightEye);
+    }
+
+    createChunk(x, z) {
+        const geometry = new THREE.PlaneGeometry(this.chunkSize, this.chunkSize, 20, 20);
+        const material = new THREE.MeshStandardMaterial({
+            color: 0x3a8024,
+            roughness: 0.8,
+            metalness: 0.2,
+            wireframe: false
+        });
+
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set(x, 0, z);
+        mesh.receiveShadow = true;
+
+        // Add terrain variation
+        const vertices = geometry.attributes.position.array;
+        for (let i = 0; i < vertices.length; i += 3) {
+            vertices[i + 1] = Math.sin(vertices[i] / 5) * Math.cos(vertices[i + 2] / 5) * 0.5;
+        }
+        geometry.computeVertexNormals();
+
+        // Add collision box
+        const box = new THREE.Box3().setFromObject(mesh);
+        mesh.box = box;
+
+        return mesh;
+    }
+
+    updateWorld() {
+        // Calculate current chunk
+        const currentChunkZ = Math.floor(this.character.position.z / this.chunkSize);
+        
+        // Generate new chunks ahead
+        for (let i = 0; i <= 2; i++) {
+            this.generateChunk(currentChunkZ + i);
+        }
+        
+        // Remove chunks that are too far behind
+        for (const chunk of this.activeChunks) {
+            if (chunk < currentChunkZ - 1) {
+                this.activeChunks.delete(chunk);
+                // Remove objects in this chunk (simplified version)
+                this.scene.children = this.scene.children.filter(child => {
+                    if (child.position && child.position.z < chunk * this.chunkSize + this.chunkSize) {
+                        return false;
+                    }
+                    return true;
+                });
+            }
+        }
     }
 
     generateChunk(chunkZ) {
@@ -259,67 +378,6 @@ class Game {
         }
         
         this.activeChunks.add(chunkZ);
-    }
-
-    updateWorld() {
-        // Calculate current chunk
-        const currentChunkZ = Math.floor(this.character.position.z / this.chunkSize);
-        
-        // Generate new chunks ahead
-        for (let i = 0; i <= 2; i++) {
-            this.generateChunk(currentChunkZ + i);
-        }
-        
-        // Remove chunks that are too far behind
-        for (const chunk of this.activeChunks) {
-            if (chunk < currentChunkZ - 1) {
-                this.activeChunks.delete(chunk);
-                // Remove objects in this chunk (simplified version)
-                this.scene.children = this.scene.children.filter(child => {
-                    if (child.position && child.position.z < chunk * this.chunkSize + this.chunkSize) {
-                        return false;
-                    }
-                    return true;
-                });
-            }
-        }
-    }
-
-    createCharacter() {
-        const geometry = new THREE.BoxGeometry(0.5, 1, 0.5);
-        const material = new THREE.MeshPhongMaterial({ color: 0x00ff00 });
-        this.character = new THREE.Mesh(geometry, material);
-        this.character.castShadow = true;
-        this.character.receiveShadow = true;
-        
-        // Set initial position
-        this.character.position.set(0, 1, 0); // Start at center
-        
-        this.scene.add(this.character);
-        
-        // After adding to scene, move to random spawn point
-        setTimeout(() => {
-            if (this.character && this.spawnPoints) {
-                const randomIndex = Math.floor(Math.random() * this.spawnPoints.length);
-                const spawnPoint = this.spawnPoints[randomIndex];
-                this.character.position.copy(spawnPoint);
-            }
-        }, 100);
-    }
-
-    getRandomSpawnPoint() {
-        if (!this.spawnPoints || this.spawnPoints.length === 0) {
-            return new THREE.Vector3(0, 1, 0);
-        }
-        const randomIndex = Math.floor(Math.random() * this.spawnPoints.length);
-        return this.spawnPoints[randomIndex].clone();
-    }
-
-    respawnCharacter() {
-        if (!this.character) return;
-        const spawnPoint = this.getRandomSpawnPoint();
-        this.character.position.copy(spawnPoint);
-        this.velocity.set(0, 0, 0); // Reset velocity
     }
 
     setupLighting() {

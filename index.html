@@ -3,39 +3,20 @@
 <head>
     <title>FPS Game</title>
     <style>
-        body { 
+        body {
             margin: 0;
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
         }
-        canvas { 
-            display: block;
-        }
-        #crosshair {
+        #menu {
             position: fixed;
             top: 50%;
             left: 50%;
-            transform: translate(-50%, -50%) translateZ(2px);
-            color: rgba(255, 255, 255, 0.8);
-            font-size: 24px;
-            pointer-events: none;
-            user-select: none;
-            z-index: 1000;
-            text-shadow: 
-                -1px -1px 0 #000,  
-                1px -1px 0 #000,
-                -1px 1px 0 #000,
-                1px 1px 0 #000;
-            transform-style: preserve-3d;
-            perspective: 1000px;
-        }
-        #menu {
-            position: absolute;
-            top: 50%;
-            left: 50%;
             transform: translate(-50%, -50%);
-            text-align: center;
             background: rgba(0, 0, 0, 0.8);
             padding: 20px;
             border-radius: 10px;
+            text-align: center;
             color: white;
             display: none;
         }
@@ -51,78 +32,78 @@
             margin: 4px 2px;
             cursor: pointer;
             border-radius: 4px;
+            transition: background-color 0.3s;
         }
-        #gameId {
-            display: none;
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: rgba(0, 0, 0, 0.8);
-            color: white;
-            padding: 10px;
-            border-radius: 5px;
+        .button:hover {
+            background: #45a049;
         }
         #joinPrompt {
-            display: none;
-            position: absolute;
+            position: fixed;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
             background: rgba(0, 0, 0, 0.8);
             padding: 20px;
             border-radius: 10px;
+            text-align: center;
             color: white;
+            display: none;
+        }
+        #gameId {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            display: none;
         }
         input {
             padding: 10px;
             margin: 10px;
             border-radius: 4px;
-            border: none;
+            border: 1px solid #ddd;
+            width: 200px;
         }
-        .death-screen {
-            position: absolute;
+        #crosshair {
+            position: fixed;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            text-align: center;
+            color: white;
+            font-size: 24px;
+            pointer-events: none;
+            text-shadow: 0 0 3px rgba(0,0,0,0.5);
+        }
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 24px;
             background: rgba(0, 0, 0, 0.8);
             padding: 20px;
             border-radius: 10px;
-            color: white;
-        }
-        .death-screen {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.7);
-            color: white;
             display: none;
-            justify-content: center;
-            align-items: center;
-            font-size: 2em;
-            z-index: 1000;
         }
     </style>
 </head>
 <body>
-    <div id="crosshair">+</div>
     <div id="menu">
-        <h2>Multiplayer FPS</h2>
+        <h2>Welcome to FPS Game</h2>
         <button id="hostButton" class="button">Host Game</button>
         <button id="joinButton" class="button">Join Game</button>
     </div>
     <div id="joinPrompt">
-        <h3>Enter Game ID</h3>
-        <input type="text" id="gameIdInput" placeholder="Game ID">
+        <h2>Join Game</h2>
+        <input type="text" id="gameIdInput" placeholder="Enter Game ID">
         <button id="confirmJoin" class="button">Join</button>
     </div>
     <div id="gameId"></div>
-    <div id="gameContainer"></div>
-    <div class="death-screen">
-        ELIMINATED! You can still move but cannot shoot
-    </div>
+    <div id="crosshair">+</div>
+    <div id="loading" class="loading">Loading...</div>
     <script type="importmap">
         {
             "imports": {
